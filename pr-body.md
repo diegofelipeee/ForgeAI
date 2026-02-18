@@ -1,12 +1,17 @@
-# Phase 24 — Configurable LLM Models + Latest Provider Updates
+## Description
 
-## Summary
+Phase 24 — Updated all 9 LLM provider model lists to the latest from official docs (OpenAI, Anthropic, Google, xAI, etc.) and made model lists **fully configurable** per provider via the dashboard and API. Custom models stored encrypted in Vault, auto-loaded on startup.
 
-Updated all 9 LLM provider model lists to the latest available from official documentation and made model lists **fully configurable** per provider via the dashboard and API. Custom model configurations are stored encrypted in Vault and automatically loaded on startup.
+## Type of Change
 
----
+- [ ] 🐛 Bug fix
+- [x] ✨ New feature
+- [ ] ♻️ Refactor (no functional changes)
+- [x] 📝 Documentation
+- [ ] 🧪 Tests
+- [x] 🔒 Security
 
-## What Changed
+## Changes Made
 
 ### 1. Updated Model Lists (from Official Docs)
 
@@ -71,19 +76,37 @@ New feature: users can now customize which models are available for each provide
 | `README.md` | Updated provider table, roadmap, test count |
 | `tests/api.test.ts` | Fixed flaky voice tests (accept 400 or 429) |
 
+## How to Test
+
+1. `pnpm -r build`
+2. `pnpm forge start --migrate`
+3. `pnpm test` — expect **53/53 tests passing**
+4. Open dashboard → Settings → click "Configure models" on any provider
+5. Verify models list loads correctly, add/remove/save works
+6. `GET /api/providers/openai/models` should return GPT-5.2 family
+7. `GET /api/providers/anthropic/models` should return Claude 4.6 family
+
+## Related Issue
+
+N/A
+
+## Screenshots
+
+N/A
+
+## Checklist
+
+- [x] Code builds without errors (`pnpm -r build`)
+- [x] Tests pass (`pnpm test`) — 53/53
+- [x] Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/)
+- [x] No secrets or API keys committed
+- [x] Documentation updated (README roadmap, provider tables)
+
 ---
 
-## Testing
+## Additional Details
 
-- **53/53 E2E tests passing** (all green)
-- Verified `GET /api/providers/openai/models` returns correct new model list
-- Verified `GET /api/providers/anthropic/models` returns correct Claude 4.6 models
-- Dashboard model editor renders and functions correctly
-- All 4 packages build successfully (`agent`, `core`, `dashboard`, `security`)
-
----
-
-## Roadmap Update
+### Roadmap Update
 
 **Completed (now 24 phases):**
 - Configurable LLM models per provider (dashboard + API + Vault)
