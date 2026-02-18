@@ -689,8 +689,49 @@ export class Gateway {
   private registerSecurityAlerts(): void {
     const broadcaster = getWSBroadcaster();
 
+    // Telegram rate limiting — max 1 message per 60s, batch alerts in between
+    const TG_COOLDOWN_MS = 60_000;
+    let lastTgSentAt = 0;
+    let pendingAlerts: Array<{ severity: string; title: string; timestamp: number }> = [];
+    let batchTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const flushTelegramAlerts = async () => {
+      batchTimer = null;
+      if (pendingAlerts.length === 0) return;
+
+      try {
+        const tg = getTelegramChannel();
+        if (!tg?.isConnected()) { pendingAlerts = []; return; }
+
+        const perms = tg.getPermissions();
+        const adminId = (perms as { adminUsers?: string[] }).adminUsers?.[0];
+        if (!adminId) { pendingAlerts = []; return; }
+
+        const count = pendingAlerts.length;
+        const criticalCount = pendingAlerts.filter(a => a.severity === 'critical').length;
+        const emoji = criticalCount > 0 ? '🚨' : '⚠️';
+
+        let text: string;
+        if (count === 1) {
+          const a = pendingAlerts[0];
+          text = `${emoji} **${a.title}**\n\n_${new Date(a.timestamp).toLocaleString()}_`;
+        } else {
+          const summary = pendingAlerts.slice(0, 5).map(a => `• ${a.title}`).join('\n');
+          const extra = count > 5 ? `\n_...and ${count - 5} more_` : '';
+          text = `${emoji} **${count} Security Alerts** (${criticalCount} critical)\n\n${summary}${extra}`;
+        }
+
+        await tg.send({ channelType: 'telegram', recipientId: adminId, content: text });
+        lastTgSentAt = Date.now();
+        pendingAlerts = [];
+      } catch (err) {
+        logger.error('Failed to send security alert to Telegram', err);
+        pendingAlerts = [];
+      }
+    };
+
     this.auditLogger.onAlert(async (alert) => {
-      // 1. Broadcast to WebSocket clients (Dashboard real-time)
+      // 1. Broadcast to WebSocket clients (instant — cheap)
       broadcaster.broadcastAll({
         type: 'security.alert',
         payload: {
@@ -702,47 +743,21 @@ export class Gateway {
         },
       });
 
-      // 2. Send to Telegram admin (if channel is connected)
-      try {
-        const tg = getTelegramChannel();
-        if (tg?.isConnected()) {
-          const perms = tg.getPermissions();
-          const adminId = (perms as { adminUsers?: string[] }).adminUsers?.[0];
-          if (adminId) {
-            const emoji = alert.severity === 'critical' ? '🚨' : '⚠️';
-            const text = [
-              `${emoji} **${alert.title}**`,
-              '',
-              alert.message,
-              '',
-              `_${new Date(alert.timestamp).toLocaleString()}_`,
-            ].join('\n');
+      // 2. Queue Telegram alert (rate-limited: max 1 msg per 60s)
+      pendingAlerts.push({ severity: alert.severity, title: alert.title, timestamp: Date.now() });
 
-            await tg.send({
-              channelType: 'telegram',
-              recipientId: adminId,
-              content: text,
-            });
-          }
-        }
-      } catch (err) {
-        logger.error('Failed to send security alert to Telegram', err);
+      const elapsed = Date.now() - lastTgSentAt;
+      if (elapsed >= TG_COOLDOWN_MS) {
+        // Cooldown expired — send immediately
+        if (batchTimer) { clearTimeout(batchTimer); batchTimer = null; }
+        await flushTelegramAlerts();
+      } else if (!batchTimer) {
+        // Schedule flush when cooldown expires
+        batchTimer = setTimeout(() => flushTelegramAlerts(), TG_COOLDOWN_MS - elapsed);
       }
-
-      // 3. Log that alert was sent
-      this.auditLogger.log({
-        action: 'security.alert_sent' as any,
-        details: {
-          alertId: alert.id,
-          severity: alert.severity,
-          title: alert.title,
-          channel: 'websocket+telegram',
-        },
-        riskLevel: 'low',
-      });
     });
 
-    logger.info('Security alert handlers registered (WebSocket + Telegram)');
+    logger.info('Security alert handlers registered (WebSocket + Telegram, 60s cooldown)');
   }
 
   async start(): Promise<void> {
