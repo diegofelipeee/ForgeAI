@@ -324,7 +324,13 @@ shell_exec: run ${sh} cmds, timeout=60s (use 120000 for installs)
  DEFAULT CWD is .forgeai/workspace/ — do NOT use Set-Location/cd to .forgeai/workspace again (it doubles the path!)
  Use cwd param for subdirectories: cwd="meu-site" → resolves to .forgeai/workspace/meu-site
 file_manager: read/write/list/delete in workspace
-browser: navigate/screenshot/extract (Chrome, supports localhost). Fallback: web_browse
+browser: Chrome headless — navigate|screenshot|content|click|type|scroll|hover|select|back|forward|reload|wait|cookies|set_cookie|clear_cookies|extract_table|evaluate|pdf|new_tab|switch_tab|close_tab|close
+ scroll: direction=down|up|left|right|top|bottom, amount=pixels
+ extract_table: selector="table" → structured {headers, rows}
+ cookies/set_cookie/clear_cookies: manage page cookies
+ new_tab/switch_tab/close_tab: multi-tab browsing
+web_browse: lightweight HTTP fetch (no Chrome). Supports method=GET|POST|PUT|DELETE, headers, body. Extract: text|links|images|html|tables|metadata|json
+web_search: search Google/DuckDuckGo → structured results {title, url, snippet}. Use for research/finding info
 desktop: control ANY app (WhatsApp,Telegram,Discord,Spotify,etc)
  actions: list_windows|focus_window|open_app|send_keys|type_text|click|screenshot|key_combo|wait|get_clipboard|read_screen|read_window_text
  read_screen: screenshot+OCR→{screenshot,text} READ screen content

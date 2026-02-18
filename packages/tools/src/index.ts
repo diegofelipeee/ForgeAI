@@ -13,6 +13,7 @@ export { PuppeteerBrowserTool } from './tools/puppeteer-browser.js';
 export { ShellExecTool } from './tools/shell-exec.js';
 export { DesktopAutomationTool } from './tools/desktop-automation.js';
 export { ImageGeneratorTool } from './tools/image-generator.js';
+export { WebSearchTool } from './tools/web-search.js';
 export { SessionsListTool, SessionsHistoryTool, SessionsSendTool, setAgentManagerRef } from './tools/session-tools.js';
 export { SandboxManager, createSandboxManager } from './sandbox-manager.js';
 export type { SandboxConfig, SandboxResult } from './sandbox-manager.js';
@@ -37,6 +38,7 @@ import { PuppeteerBrowserTool } from './tools/puppeteer-browser.js';
 import { ShellExecTool } from './tools/shell-exec.js';
 import { DesktopAutomationTool } from './tools/desktop-automation.js';
 import { ImageGeneratorTool } from './tools/image-generator.js';
+import { WebSearchTool } from './tools/web-search.js';
 import { SessionsListTool, SessionsHistoryTool, SessionsSendTool } from './tools/session-tools.js';
 import type { AuditLogger } from '@forgeai/security';
 
@@ -52,6 +54,7 @@ export function createDefaultToolRegistry(auditLogger?: AuditLogger): ToolRegist
   registry.register(new ShellExecTool());
   registry.register(new DesktopAutomationTool());
   registry.register(new ImageGeneratorTool());
+  registry.register(new WebSearchTool());
   registry.register(new SessionsListTool());
   registry.register(new SessionsHistoryTool());
   registry.register(new SessionsSendTool());
