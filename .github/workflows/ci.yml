@@ -117,11 +117,11 @@ jobs:
 
       - name: Start gateway
         env:
-          DB_HOST: 127.0.0.1
-          DB_PORT: 3306
-          DB_USER: root
-          DB_PASSWORD: forgeai_test
-          DB_NAME: forgeai_test
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: 3306
+          MYSQL_USER: root
+          MYSQL_PASSWORD: forgeai_test
+          MYSQL_DATABASE: forgeai_test
           GATEWAY_PORT: 18800
           JWT_SECRET: ci-test-jwt-secret-do-not-use-in-prod
           VAULT_MASTER_PASSWORD: ci-test-vault-password-do-not-use
