@@ -553,7 +553,7 @@ pnpm forge status      # Quick status check
 
 ## 🗺 Roadmap
 
-### Completed — 22 Phases
+### Completed — 25 Phases
 
 All core features are implemented and tested:
 
@@ -568,6 +568,7 @@ All core features are implemented and tested:
 - **Infrastructure** — Docker, CI/CD, E2E tests, OpenTelemetry, GDPR, OAuth2, IP filtering
 - **Security Hardening** — Startup integrity check, generic webhook alerts, audit log rotation, RBAC hard enforcement (403 block for non-admin authenticated users)
 - **Configurable Models** — All 9 provider model lists updated to latest (GPT-5.2, Claude Opus 4.6, Grok 4, etc.), configurable per provider via dashboard + API, stored encrypted in Vault
+- **Browser Tools Upgrade** — Puppeteer: 21 actions (scroll, hover, select, cookies, multi-tab, extract_table). web_browse: HTTP methods, headers, tables/metadata/json. New web_search tool (Google/DuckDuckGo)
 
 ### What's Next
 
