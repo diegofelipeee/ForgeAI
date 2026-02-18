@@ -418,7 +418,7 @@ describe('ForgeAI Gateway API Tests', () => {
     });
   });
 
-  // ─── Tools (image_generate) ──────────────────────
+  // ─── Tools ──────────────────────────────────────
   describe('Tools', () => {
     it('GET /api/tools should include image_generate', async () => {
       const { status, data } = await get('/api/tools');
@@ -426,6 +426,21 @@ describe('ForgeAI Gateway API Tests', () => {
       const tools = data.tools ?? data;
       const toolNames = (tools as Array<{ name: string }>).map(t => t.name);
       expect(toolNames).toContain('image_generate');
+    });
+
+    it('GET /api/tools should include web_search', async () => {
+      const { status, data } = await get('/api/tools');
+      expect(status).toBe(200);
+      const tools = data.tools ?? data;
+      const toolNames = (tools as Array<{ name: string }>).map(t => t.name);
+      expect(toolNames).toContain('web_search');
+    });
+
+    it('GET /api/tools should have 13 tools registered', async () => {
+      const { status, data } = await get('/api/tools');
+      expect(status).toBe(200);
+      const tools = data.tools ?? data;
+      expect((tools as Array<unknown>).length).toBe(13);
     });
   });
 

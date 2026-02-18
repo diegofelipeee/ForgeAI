@@ -139,12 +139,13 @@ All model lists are **configurable per provider** via the dashboard Settings pag
 
 Every provider has **circuit breaker** protection (5-failure threshold, 2-minute cooldown), **exponential backoff** retries, and **automatic failover** to the next provider in the chain.
 
-### Built-in Tools (12)
+### Built-in Tools (13)
 
 | Tool | What it does |
 |:-----|:-------------|
-| `web_browse` | Fetch and parse web pages with Cheerio. SSRF protection (blocks private IPs). |
-| `browser` | Full Puppeteer: navigate, screenshot, click, type, evaluate JS, export PDF. |
+| `web_browse` | HTTP fetch + parse (Cheerio). GET/POST/PUT/DELETE, custom headers, extract: text/links/images/tables/metadata/json. |
+| `browser` | Full Puppeteer Chrome: navigate, screenshot, click, type, scroll, hover, select, back/forward/reload, wait, cookies, extract tables, evaluate JS, PDF, multi-tab. |
+| `web_search` | Search Google/DuckDuckGo — returns structured results (title, URL, snippet). Auto-fallback between engines. |
 | `file_manager` | Sandboxed CRUD. Path traversal protection. Blocks `.exe`, `.bat`, `.sh`. |
 | `shell_exec` | Execute system commands with timeout, output capture, and error handling. |
 | `code_run` | JavaScript execution in isolated `node:vm` sandbox. No fs/net/process. |
@@ -559,7 +560,7 @@ All core features are implemented and tested:
 - **Security** — 7 modules, encrypted vault, RBAC, rate limiting, prompt guard, 2FA, audit
 - **Agent** — Multi-LLM router (9 providers incl. Ollama local), agentic loop (25 iter), thinking levels, failover + circuit breaker
 - **Channels** — WhatsApp, Telegram, Discord, Slack, Teams, Google Chat, WebChat
-- **Tools** — 12 built-in + MCP Client + Puppeteer + Shell + Sandbox
+- **Tools** — 13 built-in + MCP Client + Puppeteer + Shell + Sandbox
 - **Dashboard** — 17 pages, WebSocket real-time, provider balance tracking
 - **Multimodal** — Vision input (image analysis), Voice STT/TTS, Image generation (DALL-E 3, Leonardo AI, Stable Diffusion)
 - **Integrations** — GitHub, Gmail, Google Calendar, Notion, RSS
