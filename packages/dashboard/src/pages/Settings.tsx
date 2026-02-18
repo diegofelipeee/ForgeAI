@@ -224,6 +224,15 @@ export function SettingsPage() {
           </div>
           <div className="flex items-center justify-between p-4">
             <div>
+              <p className="text-sm text-white font-medium">Leonardo AI</p>
+              <p className="text-xs text-zinc-500">Leonardo Phoenix model — set LEONARDO_API_KEY</p>
+            </div>
+            <span className="text-xs px-2 py-0.5 rounded-full bg-zinc-700 text-zinc-400">
+              ENV: LEONARDO_API_KEY
+            </span>
+          </div>
+          <div className="flex items-center justify-between p-4">
+            <div>
               <p className="text-sm text-white font-medium">Stable Diffusion (Local)</p>
               <p className="text-xs text-zinc-500">AUTOMATIC1111 WebUI with --api flag</p>
             </div>
