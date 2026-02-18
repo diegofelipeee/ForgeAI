@@ -273,7 +273,7 @@ export class TelegramChannel extends BaseChannel {
       await this.handleInbound(inbound);
     });
 
-    // Handle photos with captions
+    // Handle photos with captions — download image and attach as base64
     this.bot.on('message:photo', async (ctx: Context) => {
       const msg = ctx.message;
       if (!msg) return;
@@ -284,7 +284,28 @@ export class TelegramChannel extends BaseChannel {
       const isGroup = msg.chat.type === 'group' || msg.chat.type === 'supergroup';
       if (isGroup && !this.isGroupAllowed(String(msg.chat.id))) return;
 
-      const caption = (msg as { caption?: string }).caption ?? '[Photo]';
+      const caption = (msg as { caption?: string }).caption ?? 'Analyze this image';
+      const photos = (msg as { photo?: Array<{ file_id: string; width: number }> }).photo ?? [];
+      // Get largest photo (last in array)
+      const photo = photos[photos.length - 1];
+
+      let imageData: { base64: string; mimeType: string } | undefined;
+      if (photo) {
+        try {
+          const file = await this.bot.api.getFile(photo.file_id);
+          const fileUrl = `https://api.telegram.org/file/bot${this.config.botToken}/${file.file_path}`;
+          const res = await fetch(fileUrl);
+          if (res.ok) {
+            const buffer = Buffer.from(await res.arrayBuffer());
+            const ext = file.file_path?.split('.').pop() ?? 'jpg';
+            const mimeType = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+            imageData = { base64: buffer.toString('base64'), mimeType };
+            this.logger.debug('Photo downloaded', { fileId: photo.file_id, size: buffer.length });
+          }
+        } catch (err) {
+          this.logger.error('Failed to download photo', err);
+        }
+      }
 
       const inbound: InboundMessage = {
         id: generateId('tmsg'),
@@ -295,6 +316,53 @@ export class TelegramChannel extends BaseChannel {
         groupId: isGroup ? String(msg.chat.id) : undefined,
         groupName: isGroup ? (msg.chat as { title?: string }).title : undefined,
         content: caption,
+        image: imageData,
+        timestamp: new Date(msg.date * 1000),
+        raw: msg as unknown as Record<string, unknown>,
+      };
+
+      await this.handleInbound(inbound);
+    });
+
+    // Handle voice messages — download audio for STT processing
+    this.bot.on('message:voice', async (ctx: Context) => {
+      const msg = ctx.message;
+      if (!msg) return;
+
+      const senderId = String(msg.from?.id ?? '');
+      if (!this.isUserAllowed(senderId)) return;
+
+      const isGroup = msg.chat.type === 'group' || msg.chat.type === 'supergroup';
+      if (isGroup && !this.isGroupAllowed(String(msg.chat.id))) return;
+
+      const voice = (msg as { voice?: { file_id: string; duration: number } }).voice;
+      let audioData: { buffer: Buffer; mimeType: string } | undefined;
+
+      if (voice) {
+        try {
+          const file = await this.bot.api.getFile(voice.file_id);
+          const fileUrl = `https://api.telegram.org/file/bot${this.config.botToken}/${file.file_path}`;
+          const res = await fetch(fileUrl);
+          if (res.ok) {
+            const buffer = Buffer.from(await res.arrayBuffer());
+            audioData = { buffer, mimeType: 'audio/ogg' };
+            this.logger.debug('Voice downloaded', { fileId: voice.file_id, duration: voice.duration, size: buffer.length });
+          }
+        } catch (err) {
+          this.logger.error('Failed to download voice message', err);
+        }
+      }
+
+      const inbound: InboundMessage = {
+        id: generateId('tmsg'),
+        channelType: 'telegram',
+        channelMessageId: String(msg.message_id),
+        senderId,
+        senderName: msg.from?.first_name ?? 'Unknown',
+        groupId: isGroup ? String(msg.chat.id) : undefined,
+        groupName: isGroup ? (msg.chat as { title?: string }).title : undefined,
+        content: audioData ? '[Voice message]' : '[Voice message - download failed]',
+        audio: audioData,
         timestamp: new Date(msg.date * 1000),
         raw: msg as unknown as Record<string, unknown>,
       };

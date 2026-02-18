@@ -70,6 +70,22 @@ export class DiscordChannel extends BaseChannel {
         content = content.replace(new RegExp(`<@!?${this.botUserId}>`, 'g'), '').trim();
       }
 
+      // Download first image attachment if present
+      let imageData: { base64: string; mimeType: string } | undefined;
+      const imageAttachment = msg.attachments.find(a => a.contentType?.startsWith('image/'));
+      if (imageAttachment) {
+        try {
+          const res = await fetch(imageAttachment.url);
+          if (res.ok) {
+            const buffer = Buffer.from(await res.arrayBuffer());
+            imageData = { base64: buffer.toString('base64'), mimeType: imageAttachment.contentType ?? 'image/png' };
+          }
+        } catch (err) {
+          this.logger.error('Failed to download Discord image attachment', err);
+        }
+        if (!content) content = 'Analyze this image';
+      }
+
       if (!content) return;
 
       const inbound: InboundMessage = {
@@ -81,6 +97,7 @@ export class DiscordChannel extends BaseChannel {
         groupId: isGuild ? msg.channelId : undefined,
         groupName: isGuild ? (msg.channel as { name?: string }).name : undefined,
         content,
+        image: imageData,
         replyToId: msg.reference?.messageId ?? undefined,
         timestamp: msg.createdAt,
         raw: {

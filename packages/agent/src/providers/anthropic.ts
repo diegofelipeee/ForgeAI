@@ -14,7 +14,7 @@ const ANTHROPIC_MODELS = [
 
 interface AnthropicMessage {
   role: 'user' | 'assistant';
-  content: string;
+  content: string | Array<{ type: string; text?: string; source?: { type: string; media_type: string; data: string } }>;
 }
 
 interface AnthropicResponse {
@@ -221,9 +221,19 @@ export class AnthropicProvider implements LLMProviderAdapter {
   private convertMessages(messages: LLMRequest['messages']): AnthropicMessage[] {
     return messages
       .filter(m => m.role !== 'system')
-      .map(m => ({
-        role: m.role === 'assistant' ? 'assistant' as const : 'user' as const,
-        content: m.content,
-      }));
+      .map(m => {
+        const role = m.role === 'assistant' ? 'assistant' as const : 'user' as const;
+        // Multimodal: if message has imageData, use Anthropic content block format
+        if (m.imageData && m.role === 'user') {
+          return {
+            role,
+            content: [
+              { type: 'image', source: { type: 'base64', media_type: m.imageData.mimeType, data: m.imageData.base64 } },
+              { type: 'text', text: m.content },
+            ],
+          };
+        }
+        return { role, content: m.content };
+      });
   }
 }

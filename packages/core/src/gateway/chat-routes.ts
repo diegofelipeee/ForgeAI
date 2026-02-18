@@ -563,13 +563,28 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
 
         const chatId = inbound.groupId ?? inbound.senderId;
 
+        // Voice message → STT transcription
+        let messageContent = inbound.content;
+        let isVoiceMessage = false;
+        if (inbound.audio && voiceEngine?.isEnabled()) {
+          try {
+            const sttResult = await voiceEngine.listen(inbound.audio.buffer, { format: 'ogg' });
+            messageContent = sttResult.text;
+            isVoiceMessage = true;
+            logger.info('Voice transcribed (Telegram)', { text: messageContent.substring(0, 100), confidence: sttResult.confidence });
+          } catch (err) {
+            logger.error('STT transcription failed (Telegram)', err);
+            messageContent = '[Voice message — transcription failed]';
+          }
+        }
+
         // Persist inbound user message to chat history
         const channelMeta = { channelType: 'telegram', userId: inbound.senderId };
         const senderLabel = inbound.senderName || inbound.senderId;
         await chatHistoryStore?.saveMessage(sessionId, {
           id: `tg-user-${Date.now()}`,
           role: 'user',
-          content: inbound.content,
+          content: messageContent,
           senderName: senderLabel,
           timestamp: new Date().toISOString(),
         }, channelMeta);
@@ -578,7 +593,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
         await telegramChannel!.sendTyping(chatId);
         let statusMsgId = await telegramChannel!.sendStatusMessage(
           chatId,
-          '⏳ Analisando sua solicitacao...',
+          isVoiceMessage ? '🎤 Mensagem de voz recebida, processando...' : '⏳ Analisando sua solicitacao...',
           inbound.channelMessageId,
         );
         let lastStatusUpdate = Date.now();
@@ -633,8 +648,9 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
         const result = await agentManager.processMessage({
           sessionId,
           userId: inbound.senderId,
-          content: inbound.content,
+          content: messageContent,
           channelType: 'telegram',
+          image: inbound.image,
         });
 
         // Clean up progress listener
@@ -783,13 +799,26 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
 
         const waJid = inbound.groupId ?? inbound.senderId;
 
+        // Voice message → STT transcription
+        let waMessageContent = inbound.content;
+        if (inbound.audio && voiceEngine?.isEnabled()) {
+          try {
+            const sttResult = await voiceEngine.listen(inbound.audio.buffer, { format: 'ogg' });
+            waMessageContent = sttResult.text;
+            logger.info('Voice transcribed (WhatsApp)', { text: waMessageContent.substring(0, 100), confidence: sttResult.confidence });
+          } catch (err) {
+            logger.error('STT transcription failed (WhatsApp)', err);
+            waMessageContent = '[Voice message — transcription failed]';
+          }
+        }
+
         // Persist inbound user message to chat history
         const waMeta = { channelType: 'whatsapp', userId: inbound.senderId };
         const waSender = inbound.senderName || inbound.senderId;
         await chatHistoryStore?.saveMessage(sessionId, {
           id: `wa-user-${Date.now()}`,
           role: 'user',
-          content: inbound.content,
+          content: waMessageContent,
           senderName: waSender,
           timestamp: new Date().toISOString(),
         }, waMeta);
@@ -815,8 +844,9 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
         const result = await agentManager.processMessage({
           sessionId,
           userId: inbound.senderId,
-          content: inbound.content,
+          content: waMessageContent,
           channelType: 'whatsapp',
+          image: inbound.image,
         });
 
         // Clean up progress listener
@@ -999,6 +1029,151 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
     } catch (error) {
       logger.error('Chat request failed', error);
       reply.status(500).send({ error: 'Internal server error' });
+      return;
+    }
+  });
+
+  // POST /api/chat/voice — send audio, get text + optional TTS audio back
+  app.post('/api/chat/voice', async (request: FastifyRequest, reply: FastifyReply) => {
+    const body = request.body as {
+      audio?: string; // base64-encoded audio
+      format?: string; // audio format (ogg, wav, mp3)
+      sessionId?: string;
+      userId?: string;
+      agentId?: string;
+      ttsResponse?: boolean; // if true, return TTS audio of the response
+    };
+
+    if (!body.audio) {
+      reply.status(400).send({ error: 'audio (base64) is required' });
+      return;
+    }
+
+    if (!voiceEngine?.isEnabled()) {
+      reply.status(503).send({ error: 'Voice engine not enabled. Set VOICE_ENABLED=true and configure OPENAI_API_KEY.' });
+      return;
+    }
+
+    if (!agentManager) {
+      reply.status(503).send({ error: 'Agent runtime not initialized' });
+      return;
+    }
+
+    const sessionId = body.sessionId ?? generateId('sess');
+    const userId = body.userId ?? 'voice-user';
+
+    try {
+      // Step 1: STT — transcribe audio to text
+      const audioBuffer = Buffer.from(body.audio, 'base64');
+      const sttResult = await voiceEngine.listen(audioBuffer, { format: body.format ?? 'wav' });
+
+      logger.info('Voice chat: STT complete', { text: sttResult.text.substring(0, 100), confidence: sttResult.confidence });
+
+      // Step 2: Process message through agent
+      const result = await agentManager.processMessage({
+        sessionId,
+        userId,
+        content: sttResult.text,
+        channelType: 'voice',
+        agentId: body.agentId,
+      });
+
+      // Step 3: Optional TTS — synthesize response to audio
+      let ttsAudio: string | undefined;
+      let ttsFormat: string | undefined;
+      if (body.ttsResponse) {
+        try {
+          const ttsResult = await voiceEngine.speak(result.content.substring(0, 4000));
+          ttsAudio = ttsResult.audio.toString('base64');
+          ttsFormat = ttsResult.format;
+        } catch (ttsErr) {
+          logger.error('TTS synthesis failed', ttsErr);
+        }
+      }
+
+      return {
+        id: result.id,
+        transcription: sttResult.text,
+        transcriptionConfidence: sttResult.confidence,
+        content: result.content,
+        model: result.model,
+        provider: result.provider,
+        usage: result.usage,
+        duration: result.duration,
+        sessionId,
+        ttsAudio,
+        ttsFormat,
+      };
+    } catch (error) {
+      logger.error('Voice chat request failed', error);
+      reply.status(500).send({ error: 'Voice processing failed' });
+      return;
+    }
+  });
+
+  // POST /api/voice/synthesize — TTS: convert text to audio
+  app.post('/api/voice/synthesize', async (request: FastifyRequest, reply: FastifyReply) => {
+    const body = request.body as { text?: string; voice?: string; speed?: number; format?: string };
+
+    if (!body.text) {
+      reply.status(400).send({ error: 'text is required' });
+      return;
+    }
+
+    if (!voiceEngine?.isEnabled()) {
+      reply.status(503).send({ error: 'Voice engine not enabled' });
+      return;
+    }
+
+    try {
+      const result = await voiceEngine.speak(body.text, {
+        voice: body.voice,
+        speed: body.speed,
+        format: (body.format as 'mp3' | 'wav' | 'ogg') ?? 'mp3',
+      });
+
+      reply.header('Content-Type', `audio/${result.format}`);
+      reply.header('X-Voice-Duration-Ms', String(result.durationMs));
+      reply.header('X-Voice-Char-Count', String(result.charCount));
+      return reply.send(result.audio);
+    } catch (error) {
+      logger.error('TTS synthesis failed', error);
+      reply.status(500).send({ error: 'TTS synthesis failed' });
+      return;
+    }
+  });
+
+  // POST /api/voice/transcribe — STT: convert audio to text
+  app.post('/api/voice/transcribe', async (request: FastifyRequest, reply: FastifyReply) => {
+    const body = request.body as { audio?: string; format?: string; language?: string };
+
+    if (!body.audio) {
+      reply.status(400).send({ error: 'audio (base64) is required' });
+      return;
+    }
+
+    if (!voiceEngine?.isEnabled()) {
+      reply.status(503).send({ error: 'Voice engine not enabled' });
+      return;
+    }
+
+    try {
+      const audioBuffer = Buffer.from(body.audio, 'base64');
+      const result = await voiceEngine.listen(audioBuffer, {
+        format: body.format ?? 'wav',
+        language: body.language,
+      });
+
+      return {
+        text: result.text,
+        confidence: result.confidence,
+        language: result.language,
+        durationMs: result.durationMs,
+        provider: result.provider,
+      };
+    } catch (error) {
+      logger.error('STT transcription failed', error);
+      reply.status(500).send({ error: 'STT transcription failed' });
       return;
     }
   });

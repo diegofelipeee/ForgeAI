@@ -417,4 +417,48 @@ describe('ForgeAI Gateway API Tests', () => {
       expect(data.entries).toBeInstanceOf(Array);
     });
   });
+
+  // ─── Tools (image_generate) ──────────────────────
+  describe('Tools', () => {
+    it('GET /api/tools should include image_generate', async () => {
+      const { status, data } = await get('/api/tools');
+      expect(status).toBe(200);
+      const tools = data.tools ?? data;
+      const toolNames = (tools as Array<{ name: string }>).map(t => t.name);
+      expect(toolNames).toContain('image_generate');
+    });
+  });
+
+  // ─── Voice Engine ────────────────────────────────
+  describe('Voice Engine', () => {
+    it('GET /api/voice/config should return voice config and providers', async () => {
+      const { status, data } = await get('/api/voice/config');
+      expect(status).toBe(200);
+      expect(data.config).toBeDefined();
+      expect(data.providers).toBeDefined();
+      expect(data.providers.tts).toBeInstanceOf(Array);
+      expect(data.providers.stt).toBeInstanceOf(Array);
+    });
+
+    it('GET /api/voice/voices should return voices list', async () => {
+      const { status, data } = await get('/api/voice/voices');
+      expect(status).toBe(200);
+      expect(data.voices).toBeInstanceOf(Array);
+    });
+
+    it('POST /api/chat/voice without audio should return 400', async () => {
+      const { status } = await post('/api/chat/voice', {});
+      expect(status).toBe(400);
+    });
+
+    it('POST /api/voice/synthesize without text should return 400', async () => {
+      const { status } = await post('/api/voice/synthesize', {});
+      expect(status).toBe(400);
+    });
+
+    it('POST /api/voice/transcribe without audio should return 400', async () => {
+      const { status } = await post('/api/voice/transcribe', {});
+      expect(status).toBe(400);
+    });
+  });
 });

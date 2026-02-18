@@ -24,6 +24,10 @@ export interface InboundMessage {
   groupName?: string;
   content: string;
   mediaUrls?: string[];
+  /** Base64-encoded image for vision/multimodal processing */
+  image?: { base64: string; mimeType: string };
+  /** Raw audio buffer for voice/STT processing */
+  audio?: { buffer: Buffer; mimeType: string };
   replyToId?: string;
   timestamp: Date;
   raw: Record<string, unknown>;

@@ -237,7 +237,18 @@ export class OpenAICompatibleProvider implements LLMProviderAdapter {
 
     const body: Record<string, unknown> = {
       model: request.model,
-      messages: request.messages.map(m => ({ role: m.role, content: m.content })),
+      messages: request.messages.map(m => {
+        const msg: Record<string, unknown> = { role: m.role };
+        if (m.imageData && m.role === 'user') {
+          msg['content'] = [
+            { type: 'text', text: m.content },
+            { type: 'image_url', image_url: { url: `data:${m.imageData.mimeType};base64,${m.imageData.base64}` } },
+          ];
+        } else {
+          msg['content'] = m.content;
+        }
+        return msg;
+      }),
       stream: true,
     };
 
