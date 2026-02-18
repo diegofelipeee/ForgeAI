@@ -126,6 +126,12 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
       'DISCORD_BOT_TOKEN',
       'SLACK_BOT_TOKEN', 'SLACK_APP_TOKEN', 'SLACK_SIGNING_SECRET',
       'TEAMS_APP_ID', 'TEAMS_APP_PASSWORD',
+      'LEONARDO_API_KEY',
+      'ELEVENLABS_API_KEY',
+      'STABLE_DIFFUSION_URL',
+      'VOICE_ENABLED',
+      'OLLAMA_BASE_URL',
+      'SECURITY_WEBHOOK_URL',
     ];
     for (const envKey of channelEnvKeys) {
       const vaultKey = `env:${envKey}`;
@@ -1332,6 +1338,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
     { name: 'groq', displayName: 'Groq', models: ['llama-3.3-70b-versatile', 'mixtral-8x7b-32768'], envKey: 'GROQ_API_KEY' },
     { name: 'mistral', displayName: 'Mistral AI', models: ['mistral-large-latest', 'codestral-latest'], envKey: 'MISTRAL_API_KEY' },
     { name: 'xai', displayName: 'xAI (Grok)', models: ['grok-3', 'grok-2'], envKey: 'XAI_API_KEY' },
+    { name: 'local', displayName: 'Local LLM (Ollama)', models: ['llama3.1:8b', 'mistral:7b', 'codellama:13b', 'phi3:mini', 'qwen2.5:7b', 'deepseek-r1:8b'], envKey: 'OLLAMA_BASE_URL' },
   ];
 
   app.get('/api/providers/balances', async () => {
@@ -1379,7 +1386,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
 
     // Create provider instance and validate API key before saving
     try {
-      const { GoogleProvider, MoonshotProvider, MistralProvider, GroqProvider, DeepSeekProvider, XAIProvider, OpenAIProvider, AnthropicProvider } = await import('@forgeai/agent');
+      const { GoogleProvider, MoonshotProvider, MistralProvider, GroqProvider, DeepSeekProvider, XAIProvider, OpenAIProvider, AnthropicProvider, OllamaProvider } = await import('@forgeai/agent');
       const providerMap: Record<string, () => any> = {
         anthropic: () => new AnthropicProvider(trimmedKey),
         openai: () => new OpenAIProvider(trimmedKey),
@@ -1389,6 +1396,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
         groq: () => new GroqProvider(trimmedKey),
         deepseek: () => new DeepSeekProvider(trimmedKey),
         xai: () => new XAIProvider(trimmedKey),
+        local: () => new OllamaProvider(trimmedKey), // trimmedKey = base URL for local
       };
 
       const factory = providerMap[name];
@@ -1397,21 +1405,34 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
       const provider = factory();
 
       // Validate: try listing models or a minimal chat to confirm key works
-      try {
-        await provider.chat({
-          messages: [{ role: 'user', content: 'hi' }],
-          model: provider.listModels()[0],
-          maxTokens: 1,
-          temperature: 0,
-        });
-      } catch (validationErr: any) {
-        const errMsg = String(validationErr?.message ?? validationErr);
-        if (errMsg.includes('401') || errMsg.includes('403') || errMsg.includes('Invalid') || errMsg.includes('Unauthorized') || errMsg.includes('invalid_api_key')) {
-          logger.warn(`API key validation failed for ${name}`, { error: errMsg });
-          return { error: `Invalid API key: authentication failed. Please check your key.` };
+      if (name === 'local') {
+        // For local LLMs, validate by fetching model list instead of chat
+        try {
+          const models = await (provider as any).fetchModels();
+          if (!models || models.length === 0) {
+            return { error: `Could not connect to Ollama at ${trimmedKey}. Make sure Ollama is running.` };
+          }
+          logger.info(`Ollama connected: ${models.length} models found`, { models: models.slice(0, 5) });
+        } catch (validationErr: any) {
+          return { error: `Could not connect to Ollama at ${trimmedKey}: ${validationErr.message}` };
         }
-        // Other errors (rate limit, model not found, etc.) — key is likely valid
-        logger.debug(`API key validation for ${name} returned non-auth error (key likely valid)`, { error: errMsg });
+      } else {
+        try {
+          await provider.chat({
+            messages: [{ role: 'user', content: 'hi' }],
+            model: provider.listModels()[0],
+            maxTokens: 1,
+            temperature: 0,
+          });
+        } catch (validationErr: any) {
+          const errMsg = String(validationErr?.message ?? validationErr);
+          if (errMsg.includes('401') || errMsg.includes('403') || errMsg.includes('Invalid') || errMsg.includes('Unauthorized') || errMsg.includes('invalid_api_key')) {
+            logger.warn(`API key validation failed for ${name}`, { error: errMsg });
+            return { error: `Invalid API key: authentication failed. Please check your key.` };
+          }
+          // Other errors (rate limit, model not found, etc.) — key is likely valid
+          logger.debug(`API key validation for ${name} returned non-auth error (key likely valid)`, { error: errMsg });
+        }
       }
 
       // Key is valid — persist to Vault and register
@@ -1450,6 +1471,78 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
     syncAgentToRouter();
     logger.info(`Provider ${name} key removed`, { name });
     return { success: true, provider: name, removed: true };
+  });
+
+  // ─── Service Keys (Leonardo, ElevenLabs, SD URL, Voice) ───
+  // Same pattern as LLM provider keys — saved to Vault, loaded to process.env
+
+  const SERVICE_KEYS_META = [
+    { name: 'leonardo', display: 'Leonardo AI', envKey: 'LEONARDO_API_KEY', type: 'key' as const },
+    { name: 'elevenlabs', display: 'ElevenLabs', envKey: 'ELEVENLABS_API_KEY', type: 'key' as const },
+    { name: 'stable-diffusion', display: 'Stable Diffusion', envKey: 'STABLE_DIFFUSION_URL', type: 'url' as const },
+    { name: 'voice-enabled', display: 'Voice Engine', envKey: 'VOICE_ENABLED', type: 'toggle' as const },
+    { name: 'security-webhook', display: 'Security Webhook', envKey: 'SECURITY_WEBHOOK_URL', type: 'url' as const },
+  ];
+
+  // GET /api/services — list service configs status
+  app.get('/api/services', async () => {
+    return {
+      services: SERVICE_KEYS_META.map(s => ({
+        name: s.name,
+        display: s.display,
+        type: s.type,
+        configured: s.type === 'toggle'
+          ? process.env[s.envKey] === 'true'
+          : !!process.env[s.envKey],
+        value: s.type === 'toggle' ? process.env[s.envKey] === 'true' : undefined,
+      })),
+    };
+  });
+
+  // POST /api/services/:name — save service key/url/toggle
+  app.post('/api/services/:name', async (request: FastifyRequest) => {
+    const { name } = request.params as { name: string };
+    const { value } = request.body as { value: string };
+    const meta = SERVICE_KEYS_META.find(s => s.name === name);
+    if (!meta) return { error: `Unknown service: ${name}` };
+
+    if (!value && meta.type !== 'toggle') {
+      return { error: 'value is required' };
+    }
+
+    const trimmed = (value ?? '').trim();
+    process.env[meta.envKey] = trimmed;
+
+    if (vault?.isInitialized()) {
+      vault.set(`env:${meta.envKey}`, trimmed);
+    }
+
+    // If voice toggle changed, update voice engine
+    if (meta.name === 'voice-enabled' && voiceEngine) {
+      voiceEngine.setConfig({ enabled: trimmed === 'true' } as any);
+    }
+
+    logger.info(`Service ${name} configured via API`, { name, persisted: vault?.isInitialized() ?? false });
+    return { success: true, service: name, configured: true };
+  });
+
+  // DELETE /api/services/:name — remove service key
+  app.delete('/api/services/:name', async (request: FastifyRequest) => {
+    const { name } = request.params as { name: string };
+    const meta = SERVICE_KEYS_META.find(s => s.name === name);
+    if (!meta) return { error: `Unknown service: ${name}` };
+
+    delete process.env[meta.envKey];
+    if (vault?.isInitialized()) {
+      vault.delete(`env:${meta.envKey}`);
+    }
+
+    if (meta.name === 'voice-enabled' && voiceEngine) {
+      voiceEngine.setConfig({ enabled: false } as any);
+    }
+
+    logger.info(`Service ${name} key removed`, { name });
+    return { success: true, service: name, removed: true };
   });
 
   // ─── REST API: Tools ───────────────────────────────

@@ -10,11 +10,11 @@ const GENERATED_DIR = resolve(process.cwd(), 'data', 'generated-images');
 export class ImageGeneratorTool extends BaseTool {
   readonly definition: ToolDefinition = {
     name: 'image_generate',
-    description: 'Generate images from text descriptions using DALL-E 3 (OpenAI) or Stable Diffusion (local). Returns the file path of the generated image.',
+    description: 'Generate images from text descriptions using DALL-E 3 (OpenAI), Leonardo AI, or Stable Diffusion (local). Returns the file path of the generated image.',
     category: 'utility',
     parameters: [
       { name: 'prompt', type: 'string', description: 'Text description of the image to generate', required: true },
-      { name: 'provider', type: 'string', description: 'Image generation provider: "dalle" (default) or "stable-diffusion"', required: false },
+      { name: 'provider', type: 'string', description: 'Image generation provider: "dalle" (default), "leonardo", or "stable-diffusion"', required: false },
       { name: 'size', type: 'string', description: 'Image size: "1024x1024" (default), "1792x1024", "1024x1792"', required: false },
       { name: 'quality', type: 'string', description: 'Image quality: "standard" (default) or "hd"', required: false },
       { name: 'style', type: 'string', description: 'Image style: "vivid" (default) or "natural"', required: false },
@@ -32,6 +32,9 @@ export class ImageGeneratorTool extends BaseTool {
     const style = (params['style'] as string) ?? 'vivid';
 
     const { result, duration } = await this.timed(async () => {
+      if (provider === 'leonardo') {
+        return this.generateLeonardo(prompt, size);
+      }
       if (provider === 'stable-diffusion') {
         return this.generateStableDiffusion(prompt, size);
       }
@@ -154,6 +157,111 @@ export class ImageGeneratorTool extends BaseTool {
         success: false,
         error: `Stable Diffusion not available at ${sdUrl}. Make sure AUTOMATIC1111 WebUI is running with --api flag, or set STABLE_DIFFUSION_URL.`,
       };
+    }
+  }
+
+  private async generateLeonardo(prompt: string, size: string): Promise<Omit<ToolResult, 'duration'>> {
+    const apiKey = process.env['LEONARDO_API_KEY'];
+    if (!apiKey) {
+      return { success: false, error: 'LEONARDO_API_KEY not configured. Set it in Settings or environment.' };
+    }
+
+    const [width, height] = size.split('x').map(Number);
+
+    try {
+      // Step 1: Create generation
+      const createRes = await fetch('https://cloud.leonardo.ai/api/rest/v1/generations', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify({
+          prompt,
+          modelId: '6b645e3a-d64f-4341-a6d8-7a3690fbf042', // Leonardo Phoenix
+          width: width || 1024,
+          height: height || 1024,
+          num_images: 1,
+          alchemy: true,
+        }),
+      });
+
+      if (!createRes.ok) {
+        const error = await createRes.text();
+        logger.error('Leonardo API error', { status: createRes.status, error });
+        return { success: false, error: `Leonardo API error (${createRes.status}): ${error}` };
+      }
+
+      const createData = await createRes.json() as {
+        sdGenerationJob?: { generationId: string };
+      };
+      const generationId = createData.sdGenerationJob?.generationId;
+      if (!generationId) {
+        return { success: false, error: 'No generationId in Leonardo response' };
+      }
+
+      logger.info('Leonardo generation started', { generationId });
+
+      // Step 2: Poll for completion (max 60s)
+      let imageUrl: string | undefined;
+      for (let i = 0; i < 30; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+
+        const pollRes = await fetch(`https://cloud.leonardo.ai/api/rest/v1/generations/${generationId}`, {
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Accept': 'application/json',
+          },
+        });
+
+        if (!pollRes.ok) continue;
+
+        const pollData = await pollRes.json() as {
+          generations_by_pk?: {
+            status: string;
+            generated_images?: Array<{ url: string; id: string }>;
+          };
+        };
+
+        const gen = pollData.generations_by_pk;
+        if (gen?.status === 'COMPLETE' && gen.generated_images?.[0]?.url) {
+          imageUrl = gen.generated_images[0].url;
+          break;
+        }
+        if (gen?.status === 'FAILED') {
+          return { success: false, error: 'Leonardo generation failed' };
+        }
+      }
+
+      if (!imageUrl) {
+        return { success: false, error: 'Leonardo generation timed out (60s)' };
+      }
+
+      // Step 3: Download image and save locally
+      const imgRes = await fetch(imageUrl);
+      if (!imgRes.ok) {
+        return { success: false, error: 'Failed to download Leonardo image' };
+      }
+      const imgBuffer = Buffer.from(await imgRes.arrayBuffer());
+      const b64 = imgBuffer.toString('base64');
+      const filePath = this.saveImage(b64, 'leonardo');
+
+      logger.info('Image generated with Leonardo AI', { size, filePath, generationId });
+
+      return {
+        success: true,
+        data: {
+          filePath,
+          provider: 'leonardo-ai',
+          size,
+          generationId,
+          message: `Image generated successfully with Leonardo AI and saved to ${filePath}`,
+        },
+      };
+    } catch (err) {
+      logger.error('Leonardo generation failed', err);
+      return { success: false, error: `Leonardo generation failed: ${(err as Error).message}` };
     }
   }
 
