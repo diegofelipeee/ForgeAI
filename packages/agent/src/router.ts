@@ -259,6 +259,30 @@ export class LLMRouter {
     return result;
   }
 
+  async getBalances(): Promise<Array<{ provider: string; displayName: string; available: boolean; balance?: number; currency?: string }>> {
+    const results: Array<{ provider: string; displayName: string; available: boolean; balance?: number; currency?: string }> = [];
+    const promises = [...this.providers.values()]
+      .filter(p => p.isConfigured() && typeof p.getBalance === 'function')
+      .map(async (p) => {
+        try {
+          return await p.getBalance!();
+        } catch {
+          return { provider: p.name, displayName: p.displayName, available: false };
+        }
+      });
+    const settled = await Promise.allSettled(promises);
+    for (const r of settled) {
+      if (r.status === 'fulfilled') results.push(r.value);
+    }
+    // Also add providers that don't support balance
+    for (const p of this.providers.values()) {
+      if (p.isConfigured() && typeof p.getBalance !== 'function') {
+        results.push({ provider: p.name, displayName: p.displayName, available: false });
+      }
+    }
+    return results;
+  }
+
   getProviders(): Map<LLMProvider, LLMProviderAdapter> {
     return new Map(this.providers);
   }

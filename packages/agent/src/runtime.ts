@@ -337,12 +337,16 @@ desktop: control ANY app (WhatsApp,Telegram,Discord,Spotify,etc)
  MUST: read_screen BEFORE interact; focus_window BEFORE keys; read_screen AFTER to verify
 ${W ? `POWERSHELL CRITICAL RULES:
 - NEVER use "&&" to chain commands. Use ";" instead. Example: mkdir foo; cd foo; npm init -y
-- NEVER use "&" for background. Use Start-Process instead.
+- NEVER use "&" for background jobs.
 - NEVER use "curl -s". Use Invoke-RestMethod or Invoke-WebRequest instead.
 - For cd + command, use Set-Location or run separately: Set-Location path; command
-- Use Start-Process for background processes: Start-Process node -ArgumentList "server.js" -WindowStyle Hidden
+- Background processes: ALWAYS use Start-Process with -NoNewWindow to avoid popup windows:
+  Start-Process node -ArgumentList "server.js" -NoNewWindow -RedirectStandardOutput "NUL"
+  Or use Start-Job: Start-Job { Set-Location "path"; npx http-server -p 8080 }
+- NEVER use Start-Process WITHOUT -NoNewWindow (it opens visible .ps1/.exe popup windows!)
+- NEVER use -WindowStyle Hidden (unreliable, still flashes windows). Use -NoNewWindow instead.
 ` : ''}Server rules:
-- ALWAYS run servers as background: Start-Process node -ArgumentList "server.js" -WindowStyle Hidden
+- ALWAYS run servers as background: Start-Process node -ArgumentList "server.js" -NoNewWindow -RedirectStandardOutput "NUL"
 - NEVER run http-server/node server in foreground (it blocks and times out!)
 - Before starting a server, check if port is free: Get-NetTCPConnection -LocalPort PORT -ErrorAction SilentlyContinue
 - If port busy, pick another (try 8080, 8081, 3001, 5000)
@@ -361,7 +365,12 @@ Anti-waste rules:
 - Prefer npx over npm install -g when possible.
 Flow: step-by-step→check result→adapt on error→clear summary with all URLs/paths/info
 Planning: for multi-step tasks, FIRST respond with a brief numbered plan (3-6 lines max), then execute. Example: "Plano:\\n1. Criar index.html\\n2. Adicionar CSS\\n3. Servir com http-server"
-IMPORTANT: keep file content under 4000 chars per tool call. For large files, split into multiple writes.`;
+CRITICAL FILE SIZE RULE: NEVER put more than 3500 chars of content in a single file_manager(action=write) call. The API WILL truncate large arguments and the file will be corrupted.
+For files larger than 3500 chars, use ONE of these strategies:
+1. PREFERRED: Use shell_exec with echo/printf to write the file in chunks: shell_exec("echo 'part1...' > file.html && echo 'part2...' >> file.html")
+2. On Windows: shell_exec with Set-Content/Add-Content: shell_exec("Set-Content -Path file.html -Value 'content...'") then shell_exec("Add-Content -Path file.html -Value 'more...'")
+3. Split into multiple file_manager calls: first write with action=write (first 3000 chars), then action=append for the rest
+NEVER write an entire large HTML/CSS/JS file in a single tool call. Always split.`;
   }
 
   private detectEnvironment(): string {
@@ -548,9 +557,37 @@ IMPORTANT: keep file content under 4000 chars per tool call. For large files, sp
         totalUsage.completionTokens += response.usage.completionTokens;
         totalUsage.totalTokens += response.usage.totalTokens;
 
+        // Stream extended thinking (models with thinking support like Claude)
+        if (response.thinking) {
+          const extThinkingStep: AgentStep = {
+            type: 'thinking',
+            message: response.thinking.length > 2000 ? response.thinking.substring(0, 2000) + '...' : response.thinking,
+            timestamp: new Date().toISOString(),
+          };
+          steps.push(extThinkingStep);
+          this.emitProgress(params.sessionId, {
+            type: 'step', sessionId: params.sessionId, agentId: this.config.id,
+            step: extThinkingStep, timestamp: Date.now(),
+          });
+        }
+
         // If no tool calls, we have the final answer
         if (!response.toolCalls || response.toolCalls.length === 0) {
           break;
+        }
+
+        // Stream LLM reasoning text (the content before tool calls = agent's thought process)
+        if (response.content && response.content.trim()) {
+          const thinkingStep: AgentStep = {
+            type: 'thinking',
+            message: response.content.length > 2000 ? response.content.substring(0, 2000) + '...' : response.content,
+            timestamp: new Date().toISOString(),
+          };
+          steps.push(thinkingStep);
+          this.emitProgress(params.sessionId, {
+            type: 'step', sessionId: params.sessionId, agentId: this.config.id,
+            step: thinkingStep, timestamp: Date.now(),
+          });
         }
 
         // Execute tool calls
@@ -1013,6 +1050,16 @@ IMPORTANT: keep file content under 4000 chars per tool call. For large files, sp
 
   getProgress(sessionId: string): SessionProgress | null {
     return this.sessionProgress.get(sessionId) ?? null;
+  }
+
+  getActiveSessions(): SessionProgress[] {
+    const active: SessionProgress[] = [];
+    for (const progress of this.sessionProgress.values()) {
+      if (progress.status !== 'done' && progress.status !== 'idle') {
+        active.push({ ...progress, steps: [...progress.steps] });
+      }
+    }
+    return active;
   }
 
   private updateProgress(sessionId: string, update: Partial<SessionProgress>): void {

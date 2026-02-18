@@ -5,8 +5,8 @@ import { execFile } from 'node:child_process';
 import { BaseTool } from '../base.js';
 import type { ToolDefinition, ToolResult } from '../base.js';
 
-// ─── Security: hard-blocked patterns that could brick the OS ───
-// These are ALWAYS blocked regardless of admin mode.
+// ─── Security: hard-blocked patterns that would DESTROY the OS ───
+// Only truly catastrophic, irreversible commands. Everything else is allowed.
 const HARD_BLOCKED_PATTERNS = [
   // Linux: wipe root filesystem
   'rm -rf /',
@@ -17,85 +17,38 @@ const HARD_BLOCKED_PATTERNS = [
   // Linux: overwrite disk/MBR
   'dd if=/dev/zero of=/dev/sd',
   'dd if=/dev/random of=/dev/sd',
-  'mkfs.ext',
-  'mkfs.xfs',
-  'mkfs.btrfs',
   // Windows: wipe system drive
   'format c:',
-  'format d:',
   'rd /s /q c:\\',
   'rd /s /q c:/',
   'del /f /s /q c:\\',
   'del /f /s /q c:/',
   'rmdir /s /q c:\\',
-  // Windows: corrupt boot
+  // Windows: corrupt boot loader
   'bcdedit /deletevalue',
   'bcdedit /delete',
-  // Both: shutdown/reboot (accidental)
-  'shutdown /s',
-  'shutdown /r',
-  'shutdown -h',
-  'shutdown -r',
-  'reboot',
-  'halt',
-  'poweroff',
-  'init 0',
-  'init 6',
-  // Registry destruction
-  'reg delete hklm',
-  'reg delete hkcr',
-  // Credential theft
+  // Windows: destroy system32
+  'del /f /s /q c:\\windows\\system32',
+  'rd /s /q c:\\windows\\system32',
+  // Credential theft tools
   'mimikatz',
   'sekurlsa',
   'hashdump',
-  // Kill all node processes (would kill the gateway itself)
-  'stop-process -name node',
-  'get-process -name node',
-  'get-process node',
-  'taskkill /im node',
-  'taskkill /f /im node',
-  'killall node',
-  'pkill node',
-  'pkill -f node',
+  // Kill signal to ALL processes
   'kill -9 -1',
 ];
 
-// Patterns that are logged as HIGH RISK but still allowed (admin has power)
+// Patterns that are logged as HIGH RISK but always allowed (just audit trail)
 const HIGH_RISK_PATTERNS = [
   'rm -rf',
-  'del /f',
-  'rd /s',
-  'rmdir /s',
   'format',
   'diskpart',
-  'net user',
-  'net localgroup',
-  'netsh',
-  'reg add',
   'reg delete',
-  'chmod 777',
-  'chown root',
-  'iptables',
-  'ufw',
-  'systemctl stop',
-  'systemctl disable',
-  'kill -9',
-  'taskkill',
-  'sc delete',
-  'sc stop',
-  'pip install',
-  'npm install -g',
-  'curl | bash',
-  'curl | sh',
-  'wget -O - |',
   'powershell -enc',
-  'powershell -e ',
-  'iex(',
-  'invoke-expression',
 ];
 
-const MAX_OUTPUT_SIZE = 128 * 1024; // 128KB (generous for admin tasks)
-const DEFAULT_TIMEOUT = 60_000; // 60s (admin tasks may take longer)
+const MAX_OUTPUT_SIZE = 512 * 1024; // 512KB — assistant needs full output
+const DEFAULT_TIMEOUT = 300_000; // 5 minutes — npm install, docker build, etc.
 
 const IS_WINDOWS = process.platform === 'win32';
 
@@ -215,7 +168,7 @@ Security: destructive OS-level commands (format C:, rm -rf /, fork bombs) are bl
       // Linux: /bin/bash for full shell features
       const shell = IS_WINDOWS ? 'powershell.exe' : '/bin/bash';
       const shellArgs = IS_WINDOWS
-        ? ['-NoProfile', '-NonInteractive', '-Command', command]
+        ? ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command]
         : ['-c', command];
 
       const proc = execFile(shell, shellArgs, {

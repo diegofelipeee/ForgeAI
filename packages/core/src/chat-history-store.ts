@@ -16,6 +16,7 @@ export interface StoredMessage {
   blocked?: boolean;
   blockReason?: string;
   steps?: AgentStep[];
+  senderName?: string;
   timestamp: string;
 }
 
@@ -33,6 +34,8 @@ export interface AgentStep {
 export interface StoredSession {
   id: string;
   title: string;
+  channelType?: string;
+  userId?: string;
   createdAt: string;
   updatedAt: string;
   messageCount: number;
@@ -42,6 +45,8 @@ export interface StoredSession {
 export interface SessionSummary {
   id: string;
   title: string;
+  channelType?: string;
+  userId?: string;
   createdAt: string;
   updatedAt: string;
   messageCount: number;
@@ -68,7 +73,11 @@ export class ChatHistoryStore {
     return resolve(this.dir, `${safe}.json`);
   }
 
-  async saveMessage(sessionId: string, message: StoredMessage): Promise<void> {
+  async saveMessage(
+    sessionId: string,
+    message: StoredMessage,
+    meta?: { channelType?: string; userId?: string },
+  ): Promise<void> {
     const session = await this.loadSession(sessionId);
 
     if (!session) {
@@ -80,6 +89,8 @@ export class ChatHistoryStore {
       const newSession: StoredSession = {
         id: sessionId,
         title,
+        channelType: meta?.channelType,
+        userId: meta?.userId,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         messageCount: 1,
@@ -87,11 +98,15 @@ export class ChatHistoryStore {
       };
 
       await this.writeSession(newSession);
-      logger.debug('New session created', { sessionId, title });
+      logger.debug('New session created', { sessionId, title, channelType: meta?.channelType });
     } else {
       session.messages.push(message);
       session.messageCount = session.messages.length;
       session.updatedAt = new Date().toISOString();
+      // Update channelType if not set (e.g. old sessions migrated)
+      if (meta?.channelType && !session.channelType) {
+        session.channelType = meta.channelType;
+      }
       await this.writeSession(session);
     }
   }
@@ -125,6 +140,8 @@ export class ChatHistoryStore {
           sessions.push({
             id: session.id,
             title: session.title,
+            channelType: session.channelType,
+            userId: session.userId,
             createdAt: session.createdAt,
             updatedAt: session.updatedAt,
             messageCount: session.messageCount,

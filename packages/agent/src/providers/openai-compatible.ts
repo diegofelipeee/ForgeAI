@@ -112,6 +112,14 @@ export class OpenAICompatibleProvider implements LLMProviderAdapter {
     return this.apiKey.length > 0;
   }
 
+  getApiKey(): string {
+    return this.apiKey;
+  }
+
+  getBaseUrl(): string {
+    return this.baseUrl;
+  }
+
   listModels(): string[] {
     return [...this.models];
   }

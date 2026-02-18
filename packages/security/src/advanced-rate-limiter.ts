@@ -27,21 +27,22 @@ export interface AdvancedRateLimitResult {
 }
 
 const DEFAULT_RULES: RateLimitRule[] = [
-  // Global per-IP
-  { key: 'global', windowMs: 60_000, maxRequests: 120, burstLimit: 20, burstWindowMs: 5_000 },
-  // Per-channel limits
-  { key: 'channel:webchat', windowMs: 60_000, maxRequests: 60, burstLimit: 10, burstWindowMs: 5_000 },
-  { key: 'channel:telegram', windowMs: 60_000, maxRequests: 30, burstLimit: 8, burstWindowMs: 5_000 },
-  { key: 'channel:discord', windowMs: 60_000, maxRequests: 30, burstLimit: 8, burstWindowMs: 5_000 },
-  { key: 'channel:whatsapp', windowMs: 60_000, maxRequests: 20, burstLimit: 5, burstWindowMs: 5_000 },
-  { key: 'channel:slack', windowMs: 60_000, maxRequests: 30, burstLimit: 8, burstWindowMs: 5_000 },
-  // Per-tool limits (dangerous tools get tighter limits)
-  { key: 'tool:code_run', windowMs: 60_000, maxRequests: 10, burstLimit: 3, burstWindowMs: 10_000 },
-  { key: 'tool:file_manager', windowMs: 60_000, maxRequests: 30, burstLimit: 5, burstWindowMs: 5_000 },
-  { key: 'tool:web_browse', windowMs: 60_000, maxRequests: 20, burstLimit: 5, burstWindowMs: 5_000 },
-  { key: 'tool:browser', windowMs: 60_000, maxRequests: 10, burstLimit: 3, burstWindowMs: 10_000 },
-  { key: 'tool:cron_scheduler', windowMs: 60_000, maxRequests: 15, burstLimit: 5, burstWindowMs: 5_000 },
-  { key: 'tool:knowledge_base', windowMs: 60_000, maxRequests: 40, burstLimit: 10, burstWindowMs: 5_000 },
+  // Global — very generous for an AI assistant that chains many operations
+  { key: 'global', windowMs: 60_000, maxRequests: 600, burstLimit: 60, burstWindowMs: 5_000 },
+  // Per-channel limits — generous, assistant needs freedom
+  { key: 'channel:webchat', windowMs: 60_000, maxRequests: 300, burstLimit: 40, burstWindowMs: 5_000 },
+  { key: 'channel:telegram', windowMs: 60_000, maxRequests: 120, burstLimit: 30, burstWindowMs: 5_000 },
+  { key: 'channel:discord', windowMs: 60_000, maxRequests: 120, burstLimit: 30, burstWindowMs: 5_000 },
+  { key: 'channel:whatsapp', windowMs: 60_000, maxRequests: 120, burstLimit: 30, burstWindowMs: 5_000 },
+  { key: 'channel:slack', windowMs: 60_000, maxRequests: 120, burstLimit: 30, burstWindowMs: 5_000 },
+  // Per-tool limits — assistant may call tools dozens of times in a single task
+  { key: 'tool:shell_exec', windowMs: 60_000, maxRequests: 200, burstLimit: 30, burstWindowMs: 5_000 },
+  { key: 'tool:code_run', windowMs: 60_000, maxRequests: 200, burstLimit: 30, burstWindowMs: 5_000 },
+  { key: 'tool:file_manager', windowMs: 60_000, maxRequests: 500, burstLimit: 50, burstWindowMs: 5_000 },
+  { key: 'tool:web_browse', windowMs: 60_000, maxRequests: 200, burstLimit: 30, burstWindowMs: 5_000 },
+  { key: 'tool:browser', windowMs: 60_000, maxRequests: 100, burstLimit: 20, burstWindowMs: 5_000 },
+  { key: 'tool:cron_scheduler', windowMs: 60_000, maxRequests: 100, burstLimit: 20, burstWindowMs: 5_000 },
+  { key: 'tool:knowledge_base', windowMs: 60_000, maxRequests: 500, burstLimit: 50, burstWindowMs: 5_000 },
 ];
 
 export class AdvancedRateLimiter {

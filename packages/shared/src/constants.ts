@@ -7,7 +7,7 @@ export const DEFAULT_GATEWAY_PORT = 18800;
 export const DEFAULT_WS_PORT = 18801;
 
 export const DEFAULT_RATE_LIMIT_WINDOW_MS = 60_000;
-export const DEFAULT_RATE_LIMIT_MAX_REQUESTS = 60;
+export const DEFAULT_RATE_LIMIT_MAX_REQUESTS = 600;
 
 export const VAULT_ALGORITHM = 'aes-256-gcm';
 export const VAULT_KEY_DERIVATION = 'pbkdf2';
@@ -23,30 +23,16 @@ export const SESSION_MAX_IDLE_MS = 30 * 60 * 1000; // 30 minutes
 export const SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 export const DANGEROUS_COMMANDS = [
-  'rm -rf',
-  'rm -fr',
-  'mkfs',
-  'format',
+  'rm -rf /',
+  'rm -rf /*',
   ':(){:|:&};:',
-  'dd if=',
-  'chmod -R 777',
-  'wget',
-  'curl.*|.*sh',
-  'DROP TABLE',
-  'DROP DATABASE',
-  'DELETE FROM',
-  'TRUNCATE',
-  'shutdown',
-  'reboot',
-  'halt',
-  'init 0',
-  'init 6',
-  'del /s /q',
-  'rd /s /q',
+  'dd if=/dev/zero of=/dev/sd',
   'format c:',
-  'netsh advfirewall set',
-  'reg delete',
-  'bcdedit',
+  'del /f /s /q c:\\windows\\system32',
+  'rd /s /q c:\\windows\\system32',
+  'rd /s /q c:\\',
+  'bcdedit /delete',
+  'mimikatz',
 ];
 
 export const PROMPT_INJECTION_PATTERNS = [

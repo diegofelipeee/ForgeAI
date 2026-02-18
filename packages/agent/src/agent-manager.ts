@@ -399,6 +399,28 @@ export class AgentManager {
   }
 
   /**
+   * Get all active (currently processing) sessions across all agents.
+   */
+  getActiveSessions(): Array<{ agentId: string; sessionId: string; status: string; iteration: number; maxIterations: number; currentTool?: string; steps: unknown[]; startedAt: number }> {
+    const result: Array<{ agentId: string; sessionId: string; status: string; iteration: number; maxIterations: number; currentTool?: string; steps: unknown[]; startedAt: number }> = [];
+    for (const [agentId, runtime] of this.agents) {
+      for (const progress of runtime.getActiveSessions()) {
+        result.push({
+          agentId,
+          sessionId: progress.sessionId,
+          status: progress.status,
+          iteration: progress.iteration,
+          maxIterations: progress.maxIterations,
+          currentTool: progress.currentTool,
+          steps: progress.steps,
+          startedAt: progress.startedAt,
+        });
+      }
+    }
+    return result;
+  }
+
+  /**
    * Get history messages from the correct agent.
    */
   getHistoryMessages(sessionId: string): ReturnType<AgentRuntime['getHistoryMessages']> {

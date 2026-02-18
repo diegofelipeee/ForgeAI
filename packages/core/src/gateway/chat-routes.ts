@@ -265,7 +265,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
     model: defaultModel,
     provider: defaultProvider as any,
     temperature: 0.7,
-    maxTokens: 4096,
+    maxTokens: 16384,
     tools: [],
     sandboxMode: 'always',
   };
@@ -280,7 +280,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
     model: defaultModel,
     provider: defaultProvider as any,
     temperature: 0.7,
-    maxTokens: 4096,
+    maxTokens: 16384,
     default: true,
   });
   // Keep agentRuntime as convenience ref to default agent
@@ -352,6 +352,15 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
       if (!agentManager) return;
 
       const sessionId = inbound.groupId ?? inbound.senderId;
+      const teamsMeta = { channelType: 'teams', userId: inbound.senderId };
+      await chatHistoryStore?.saveMessage(sessionId, {
+        id: `teams-user-${Date.now()}`,
+        role: 'user',
+        content: inbound.content,
+        senderName: inbound.senderName || inbound.senderId,
+        timestamp: new Date().toISOString(),
+      }, teamsMeta);
+
       const result = await agentManager.processMessage({
         sessionId,
         userId: inbound.senderId,
@@ -359,11 +368,32 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
         channelType: 'teams',
       });
 
+      const teamsContent = result.content || '(Sem resposta — o agente atingiu o limite de iterações)';
+
+      await chatHistoryStore?.saveMessage(sessionId, {
+        id: result.id,
+        role: 'assistant',
+        content: teamsContent,
+        model: result.model,
+        provider: result.provider,
+        duration: result.duration,
+        tokens: result.usage?.totalTokens,
+        steps: result.steps,
+        timestamp: new Date().toISOString(),
+      }, teamsMeta);
+
+      getWSBroadcaster().broadcastAll({
+        type: 'agent.done',
+        sessionId,
+        channelType: 'teams',
+        timestamp: Date.now(),
+      });
+
       await teamsChannel!.send({
         channelType: 'teams',
         recipientId: inbound.senderId,
         groupId: inbound.groupId,
-        content: result.content,
+        content: teamsContent,
         replyToId: inbound.channelMessageId,
       });
     });
@@ -403,6 +433,15 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
       if (!agentManager) return;
 
       const sessionId = inbound.groupId ?? inbound.senderId;
+      const gcMeta = { channelType: 'googlechat', userId: inbound.senderId };
+      await chatHistoryStore?.saveMessage(sessionId, {
+        id: `gc-user-${Date.now()}`,
+        role: 'user',
+        content: inbound.content,
+        senderName: inbound.senderName || inbound.senderId,
+        timestamp: new Date().toISOString(),
+      }, gcMeta);
+
       const result = await agentManager.processMessage({
         content: inbound.content,
         sessionId,
@@ -410,11 +449,32 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
         channelType: 'googlechat',
       });
 
+      const gcContent = result.content || '(Sem resposta — o agente atingiu o limite de iterações)';
+
+      await chatHistoryStore?.saveMessage(sessionId, {
+        id: result.id,
+        role: 'assistant',
+        content: gcContent,
+        model: result.model,
+        provider: result.provider,
+        duration: result.duration,
+        tokens: result.usage?.totalTokens,
+        steps: result.steps,
+        timestamp: new Date().toISOString(),
+      }, gcMeta);
+
+      getWSBroadcaster().broadcastAll({
+        type: 'agent.done',
+        sessionId,
+        channelType: 'googlechat',
+        timestamp: Date.now(),
+      });
+
       await googleChatChannel!.send({
         channelType: 'googlechat',
         recipientId: inbound.id,  // Used to match pending sync reply
         groupId: inbound.groupId,
-        content: result.content,
+        content: gcContent,
       });
     });
 
@@ -497,9 +557,74 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
         }
         if (cmdResult.handled) return;
 
-        // Send typing indicator while processing
         const chatId = inbound.groupId ?? inbound.senderId;
+
+        // Persist inbound user message to chat history
+        const channelMeta = { channelType: 'telegram', userId: inbound.senderId };
+        const senderLabel = inbound.senderName || inbound.senderId;
+        await chatHistoryStore?.saveMessage(sessionId, {
+          id: `tg-user-${Date.now()}`,
+          role: 'user',
+          content: inbound.content,
+          senderName: senderLabel,
+          timestamp: new Date().toISOString(),
+        }, channelMeta);
+
+        // Send initial status message — will be updated with real progress
         await telegramChannel!.sendTyping(chatId);
+        let statusMsgId = await telegramChannel!.sendStatusMessage(
+          chatId,
+          '⏳ Analisando sua solicitacao...',
+          inbound.channelMessageId,
+        );
+        let lastStatusUpdate = Date.now();
+        let lastStatusText = '';
+
+        // Register progress listener: broadcast to WS + update Telegram status msg
+        const wsBroadcaster = getWSBroadcaster();
+        const targetAgent = agentManager.getDefaultAgent();
+        let lastTyping = Date.now();
+        const tgProgressListener = (event: Record<string, unknown>) => {
+          // Broadcast to dashboard for real-time channel progress
+          wsBroadcaster.broadcastAll({ ...event, type: `agent.${event.type}`, sessionId, channelType: 'telegram' });
+
+          // Send typing indicator every 4s
+          if (Date.now() - lastTyping > 4000) {
+            lastTyping = Date.now();
+            telegramChannel!.sendTyping(chatId).catch(() => {});
+          }
+
+          // Update Telegram status message with real progress (throttled to every 3s)
+          if (statusMsgId && Date.now() - lastStatusUpdate > 3000) {
+            let newText = '';
+            const evType = event.type as string;
+            if (evType === 'step') {
+              const step = event.step as { type: string; message?: string; tool?: string } | undefined;
+              if (step?.type === 'thinking' && step.message) {
+                const thought = step.message.length > 200 ? step.message.substring(0, 200) + '...' : step.message;
+                newText = `💭 ${thought}`;
+              } else if (step?.type === 'tool_call' && step.tool) {
+                newText = `⚙️ Executando: ${step.tool}`;
+              }
+            } else if (evType === 'progress') {
+              const p = event.progress as { status: string; iteration: number; maxIterations: number; currentTool?: string } | undefined;
+              if (p?.status === 'calling_tool' && p.currentTool) {
+                newText = `⚙️ [${p.iteration}/${p.maxIterations}] ${p.currentTool}`;
+              } else if (p?.status === 'thinking') {
+                newText = `💭 [${p.iteration}/${p.maxIterations}] Pensando...`;
+              }
+            }
+
+            if (newText && newText !== lastStatusText) {
+              lastStatusUpdate = Date.now();
+              lastStatusText = newText;
+              telegramChannel!.editMessage(chatId, statusMsgId, newText).catch(() => {});
+            }
+          }
+        };
+        if (targetAgent) {
+          targetAgent.onProgress(sessionId, tgProgressListener as any);
+        }
 
         const result = await agentManager.processMessage({
           sessionId,
@@ -508,14 +633,79 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
           channelType: 'telegram',
         });
 
+        // Clean up progress listener
+        if (targetAgent) {
+          targetAgent.offProgress(sessionId, tgProgressListener as any);
+        }
+
+        // Delete the status message now that we have the real response
+        if (statusMsgId) {
+          await telegramChannel!.deleteMessage(chatId, statusMsgId);
+        }
+
         // Append usage footer if enabled
         const footer = formatUsageFooter(sessionId, result);
+
+        // Build smart fallback when agent hits max iterations with no text response
+        let responseContent = result.content;
+        if (!responseContent && result.steps && result.steps.length > 0) {
+          const toolCalls = result.steps.filter((s: { type: string }) => s.type === 'tool_call');
+          const toolResults = result.steps.filter((s: { type: string; success?: boolean }) => s.type === 'tool_result');
+          const successes = toolResults.filter((s: { success?: boolean }) => s.success).length;
+          const failures = toolResults.filter((s: { success?: boolean }) => !s.success).length;
+          const toolNames = [...new Set(toolCalls.map((s: { tool?: string }) => s.tool).filter(Boolean))];
+          responseContent = `Processo concluido (${result.steps.length} etapas, ${toolCalls.length} acoes).\n`;
+          responseContent += `Ferramentas: ${toolNames.join(', ') || 'nenhuma'}\n`;
+          responseContent += `Resultados: ${successes} ok, ${failures} erro(s)\n`;
+          responseContent += `O agente atingiu o limite de iteracoes. Se precisar continuar, envie outra mensagem.`;
+        } else if (!responseContent) {
+          responseContent = 'Processo concluido, mas nao houve resposta textual. Envie outra mensagem se precisar de mais informacoes.';
+        }
+        const tgContent = responseContent + footer;
+
+        // Persist assistant response to chat history
+        await chatHistoryStore?.saveMessage(sessionId, {
+          id: result.id,
+          role: 'assistant',
+          content: tgContent,
+          model: result.model,
+          provider: result.provider,
+          duration: result.duration,
+          tokens: result.usage?.totalTokens,
+          steps: result.steps,
+          timestamp: new Date().toISOString(),
+        }, channelMeta);
+
+        // Send screenshots from agent steps (browser tool captures)
+        if (result.steps && result.steps.length > 0) {
+          for (const step of result.steps) {
+            if (step.type === 'tool_result' && step.result) {
+              const resultStr = typeof step.result === 'string' ? step.result : JSON.stringify(step.result);
+              const pathMatch = resultStr.match(/"path"\s*:\s*"([^"]+\.png)"/);
+              if (pathMatch) {
+                const screenshotPath = pathMatch[1].replace(/\\\\/g, '\\');
+                const { existsSync } = await import('node:fs');
+                if (existsSync(screenshotPath)) {
+                  await telegramChannel!.sendPhoto(chatId, screenshotPath, 'Screenshot');
+                }
+              }
+            }
+          }
+        }
+
+        // Broadcast agent.done to ALL clients so Chat dashboard updates in real-time
+        getWSBroadcaster().broadcastAll({
+          type: 'agent.done',
+          sessionId,
+          channelType: 'telegram',
+          timestamp: Date.now(),
+        });
 
         await telegramChannel!.send({
           channelType: 'telegram',
           recipientId: inbound.senderId,
           groupId: inbound.groupId,
-          content: result.content + footer,
+          content: tgContent,
           replyToId: inbound.channelMessageId,
         });
       });
@@ -587,9 +777,36 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
         }
         if (cmdResult.handled) return;
 
-        // Send typing indicator while processing
         const waJid = inbound.groupId ?? inbound.senderId;
+
+        // Persist inbound user message to chat history
+        const waMeta = { channelType: 'whatsapp', userId: inbound.senderId };
+        const waSender = inbound.senderName || inbound.senderId;
+        await chatHistoryStore?.saveMessage(sessionId, {
+          id: `wa-user-${Date.now()}`,
+          role: 'user',
+          content: inbound.content,
+          senderName: waSender,
+          timestamp: new Date().toISOString(),
+        }, waMeta);
+
+        // Send typing indicator while processing
         await whatsAppChannel!.sendTyping(waJid);
+
+        // Register progress listener: broadcast to WS (dashboard) + periodic typing
+        const waWsBroadcaster = getWSBroadcaster();
+        const waTargetAgent = agentManager.getDefaultAgent();
+        let waLastTyping = Date.now();
+        const waProgressListener = (event: Record<string, unknown>) => {
+          waWsBroadcaster.broadcastAll({ ...event, type: `agent.${event.type}`, sessionId, channelType: 'whatsapp' });
+          if (Date.now() - waLastTyping > 4000) {
+            waLastTyping = Date.now();
+            whatsAppChannel!.sendTyping(waJid).catch(() => {});
+          }
+        };
+        if (waTargetAgent) {
+          waTargetAgent.onProgress(sessionId, waProgressListener as any);
+        }
 
         const result = await agentManager.processMessage({
           sessionId,
@@ -598,13 +815,40 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
           channelType: 'whatsapp',
         });
 
+        // Clean up progress listener
+        if (waTargetAgent) {
+          waTargetAgent.offProgress(sessionId, waProgressListener as any);
+        }
+
         const footer = formatUsageFooter(sessionId, result);
+        const waContent = (result.content || '(Sem resposta — o agente atingiu o limite de iteracoes)') + footer;
+
+        // Persist assistant response to chat history
+        await chatHistoryStore?.saveMessage(sessionId, {
+          id: result.id,
+          role: 'assistant',
+          content: waContent,
+          model: result.model,
+          provider: result.provider,
+          duration: result.duration,
+          tokens: result.usage?.totalTokens,
+          steps: result.steps,
+          timestamp: new Date().toISOString(),
+        }, waMeta);
+
+        // Broadcast agent.done to ALL clients so Chat dashboard updates in real-time
+        getWSBroadcaster().broadcastAll({
+          type: 'agent.done',
+          sessionId,
+          channelType: 'whatsapp',
+          timestamp: Date.now(),
+        });
 
         await whatsAppChannel!.send({
           channelType: 'whatsapp',
           recipientId: inbound.senderId,
           groupId: inbound.groupId,
-          content: result.content + footer,
+          content: waContent,
           replyToId: inbound.channelMessageId,
         });
       });
@@ -658,7 +902,8 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
           content: cmdResult.response ?? '',
           timestamp: new Date().toISOString(),
         };
-        await chatHistoryStore?.saveMessage(sessionId, cmdStored);
+        const webchatMeta = { channelType: 'webchat', userId };
+        await chatHistoryStore?.saveMessage(sessionId, cmdStored, webchatMeta);
         return {
           id: cmdStored.id,
           content: cmdResult.response ?? '',
@@ -673,13 +918,14 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
       }
 
       // Persist user message
+      const webchatMeta = { channelType: 'webchat', userId };
       const userStored: StoredMessage = {
         id: `user-${Date.now()}`,
         role: 'user',
         content: body.message,
         timestamp: new Date().toISOString(),
       };
-      await chatHistoryStore?.saveMessage(sessionId, userStored);
+      await chatHistoryStore?.saveMessage(sessionId, userStored, webchatMeta);
 
       // Register WS progress listener for real-time streaming
       const wsBroadcaster = getWSBroadcaster();
@@ -723,11 +969,19 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
         steps: result.steps,
         timestamp: new Date().toISOString(),
       };
-      await chatHistoryStore?.saveMessage(sessionId, assistantStored);
+      await chatHistoryStore?.saveMessage(sessionId, assistantStored, webchatMeta);
+
+      // Broadcast agent.done AFTER message is persisted so frontend can fetch it
+      wsBroadcaster.broadcastToSession(sessionId, {
+        type: 'agent.done',
+        sessionId,
+        timestamp: Date.now(),
+      });
 
       return {
         id: result.id,
         content: result.content,
+        thinking: result.thinking,
         model: result.model,
         provider: result.provider,
         usage: result.usage,
@@ -846,6 +1100,12 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
     return { success: true, sessionId };
   });
 
+  // GET /api/chat/active — return all sessions currently being processed (for progress recovery)
+  app.get('/api/chat/active', async () => {
+    if (!agentManager) return { active: [] };
+    return { active: agentManager.getActiveSessions() };
+  });
+
   // GET /api/chat/sessions — list all persistent chat sessions
   app.get('/api/chat/sessions', async () => {
     if (!chatHistoryStore) return { sessions: [] };
@@ -894,6 +1154,18 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
     { name: 'mistral', displayName: 'Mistral AI', models: ['mistral-large-latest', 'codestral-latest'], envKey: 'MISTRAL_API_KEY' },
     { name: 'xai', displayName: 'xAI (Grok)', models: ['grok-3', 'grok-2'], envKey: 'XAI_API_KEY' },
   ];
+
+  app.get('/api/providers/balances', async () => {
+    try {
+      const balances = await router.getBalances();
+      const totalBalance = balances
+        .filter(b => b.available && b.balance != null)
+        .reduce((sum, b) => sum + (b.balance ?? 0), 0);
+      return { balances, totalBalance, currency: 'USD' };
+    } catch {
+      return { balances: [], totalBalance: 0, currency: 'USD' };
+    }
+  });
 
   app.get('/api/providers', async () => {
     const registeredProviders = router.getProviders();

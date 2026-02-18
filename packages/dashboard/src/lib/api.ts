@@ -49,6 +49,7 @@ export interface AgentStep {
 export interface ChatResponse {
   id: string;
   content: string;
+  thinking?: string;
   model: string;
   provider: string;
   usage: { promptTokens: number; completionTokens: number; totalTokens: number };
@@ -71,12 +72,15 @@ export interface StoredMessage {
   blocked?: boolean;
   blockReason?: string;
   steps?: AgentStep[];
+  senderName?: string;
   timestamp: string;
 }
 
 export interface SessionSummary {
   id: string;
   title: string;
+  channelType?: string;
+  userId?: string;
   createdAt: string;
   updatedAt: string;
   messageCount: number;
@@ -86,6 +90,8 @@ export interface SessionSummary {
 export interface StoredSession {
   id: string;
   title: string;
+  channelType?: string;
+  userId?: string;
   createdAt: string;
   updatedAt: string;
   messageCount: number;
@@ -201,6 +207,9 @@ export const api = {
   getGmailLabels: () => request<{ labels: Array<{ id: string; name: string; type: string; messagesTotal: number }> }>('/api/integrations/gmail/labels'),
   getGmailUnread: () => request<{ unreadCount: number }>('/api/integrations/gmail/unread'),
   markGmailRead: (id: string) => request<{ success: boolean }>(`/api/integrations/gmail/messages/${id}/read`, { method: 'POST' }),
+  // Active sessions (progress recovery)
+  getActiveSessions: () =>
+    request<{ active: Array<{ agentId: string; sessionId: string; status: string; iteration: number; maxIterations: number; currentTool?: string; steps: AgentStep[]; startedAt: number }> }>('/api/chat/active'),
   // Workspace Prompts
   getWorkspacePrompts: () => request<{ files: WorkspacePromptFile[] }>('/api/workspace/prompts'),
   getWorkspacePrompt: (filename: string) => request<{ filename: string; content: string }>(`/api/workspace/prompts/${encodeURIComponent(filename)}`),

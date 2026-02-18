@@ -3,7 +3,7 @@ import type { LLMResponse, UsageRecord, UsageSummary } from '@forgeai/shared';
 
 const logger = createLogger('Agent:UsageTracker');
 
-// Cost per 1M tokens (input/output) — approximate pricing
+// Cost per 1M tokens (input/output) — approximate pricing in USD
 const MODEL_PRICING: Record<string, { input: number; output: number }> = {
   // Anthropic
   'claude-sonnet-4-20250514': { input: 3.0, output: 15.0 },
@@ -21,16 +21,27 @@ const MODEL_PRICING: Record<string, { input: number; output: number }> = {
   'gemini-2.5-pro': { input: 1.25, output: 10.0 },
   'gemini-2.5-flash': { input: 0.15, output: 0.6 },
   'gemini-2.0-flash': { input: 0.1, output: 0.4 },
-  // Moonshot (Kimi) — pricing in ¥ converted to $ (~0.14)
+  // Moonshot (Kimi) — pricing via global API in USD
+  'kimi-k2.5': { input: 0.84, output: 2.8 },
   'kimi-k2-0711': { input: 0.84, output: 2.8 },
+  'kimi-k2-0711-preview': { input: 0.84, output: 2.8 },
+  'kimi-k2-0905-preview': { input: 0.84, output: 2.8 },
   'moonshot-v1-auto': { input: 0.84, output: 2.8 },
   'moonshot-v1-8k': { input: 0.17, output: 0.17 },
   'moonshot-v1-32k': { input: 0.34, output: 0.34 },
   'moonshot-v1-128k': { input: 0.84, output: 0.84 },
+  // xAI (Grok)
+  'grok-3': { input: 3.0, output: 15.0 },
+  'grok-3-mini': { input: 0.3, output: 0.5 },
+  'grok-2': { input: 2.0, output: 10.0 },
+  'grok-2-mini': { input: 0.2, output: 0.4 },
   // DeepSeek
   'deepseek-chat': { input: 0.14, output: 0.28 },
   'deepseek-coder': { input: 0.14, output: 0.28 },
   'deepseek-reasoner': { input: 0.55, output: 2.19 },
+  // Mistral
+  'mistral-large-latest': { input: 2.0, output: 6.0 },
+  'codestral-latest': { input: 0.3, output: 0.9 },
   // Groq (hosted inference — very cheap)
   'llama-3.3-70b-versatile': { input: 0.59, output: 0.79 },
   'mixtral-8x7b-32768': { input: 0.24, output: 0.24 },
