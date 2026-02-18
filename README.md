@@ -565,13 +565,13 @@ All core features are implemented and tested:
 - **Integrations** — GitHub, Gmail, Google Calendar, Notion, RSS
 - **Advanced** — RAG, AutoPlanner, Workflows, Memory, Autopilot, DM Pairing, Multi-Agent
 - **Infrastructure** — Docker, CI/CD, E2E tests, OpenTelemetry, GDPR, OAuth2, IP filtering
-- **Security Hardening** — Startup integrity check (auto-verify hash chain on boot), generic webhook alerts (custom URL for security notifications), audit log rotation (90-day retention)
+- **Security Hardening** — Startup integrity check, generic webhook alerts, audit log rotation, RBAC hard enforcement (403 block for non-admin authenticated users)
+- **Configurable Models** — All 9 provider model lists updated to latest (GPT-5.2, Claude Opus 4.6, Grok 4, etc.), configurable per provider via dashboard + API, stored encrypted in Vault
 
 ### What's Next
 
 | Feature | Priority |
 |:--------|:---------|
-| RBAC hard enforcement (block 403 when dashboard auth is integrated) | High |
 | Electron desktop app | Medium |
 | React Native mobile app (iOS + Android) | Medium |
 | Signal messenger channel | Low |
@@ -610,7 +610,7 @@ pnpm test    # 38 E2E tests
 | **Channels** | grammY, discord.js, Baileys, Bolt SDK, Bot Framework |
 | **Browser** | Puppeteer (headless Chromium) |
 | **Build** | tsup, pnpm workspaces (11 packages) |
-| **Test** | Vitest, 38 E2E API tests |
+| **Test** | Vitest, 53 E2E API tests |
 | **CI/CD** | GitHub Actions (build → test → deploy) |
 | **Deploy** | Docker multi-stage, docker-compose |
 | **Observability** | OpenTelemetry (OTLP/HTTP), structured JSON logging |
