@@ -1,5 +1,14 @@
 import type { LLMRequest, LLMResponse, LLMProvider } from '@forgeai/shared';
 
+export interface ProviderBalance {
+  provider: string;
+  displayName: string;
+  available: boolean;
+  balance?: number;
+  currency?: string;
+  raw?: Record<string, unknown>;
+}
+
 export interface LLMProviderAdapter {
   readonly name: LLMProvider;
   readonly displayName: string;
@@ -8,6 +17,7 @@ export interface LLMProviderAdapter {
   chat(request: LLMRequest): Promise<LLMResponse>;
   chatStream(request: LLMRequest): AsyncGenerator<string, LLMResponse>;
   listModels(): string[];
+  getBalance?(): Promise<ProviderBalance>;
 }
 
 export class LLMProviderError extends Error {

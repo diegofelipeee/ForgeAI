@@ -1,4 +1,4 @@
-export type { LLMProviderAdapter } from './base.js';
+export type { LLMProviderAdapter, ProviderBalance } from './base.js';
 export { LLMProviderError } from './base.js';
 export { OpenAICompatibleProvider } from './openai-compatible.js';
 export { AnthropicProvider } from './anthropic.js';

@@ -384,6 +384,46 @@ export class TelegramChannel extends BaseChannel {
     }
   }
 
+  async sendStatusMessage(chatId: string, text: string, replyToId?: string): Promise<number> {
+    try {
+      const msg = await this.bot.api.sendMessage(chatId, text, {
+        reply_parameters: replyToId ? { message_id: Number(replyToId) } : undefined,
+      });
+      return msg.message_id;
+    } catch (error) {
+      this.logger.error('Failed to send status message', error, { chatId });
+      return 0;
+    }
+  }
+
+  async editMessage(chatId: string, messageId: number, text: string): Promise<void> {
+    try {
+      await this.bot.api.editMessageText(chatId, messageId, text);
+    } catch {
+      // Ignore edit errors (message may be deleted or unchanged)
+    }
+  }
+
+  async deleteMessage(chatId: string, messageId: number): Promise<void> {
+    try {
+      await this.bot.api.deleteMessage(chatId, messageId);
+    } catch {
+      // Ignore delete errors (message may already be deleted or too old)
+    }
+  }
+
+  async sendPhoto(chatId: string, filePath: string, caption?: string): Promise<void> {
+    try {
+      const { InputFile } = await import('grammy');
+      await this.bot.api.sendPhoto(chatId, new InputFile(filePath), {
+        caption: caption ? caption.substring(0, 1024) : undefined,
+      });
+      this.logger.debug('Photo sent', { chatId, filePath });
+    } catch (error) {
+      this.logger.error('Failed to send photo', error, { chatId, filePath });
+    }
+  }
+
   async send(message: OutboundMessage): Promise<void> {
     const chatId = message.groupId ?? message.recipientId;
 
