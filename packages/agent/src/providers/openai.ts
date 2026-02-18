@@ -16,7 +16,7 @@ const OPENAI_MODELS = [
 
 interface OpenAIMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
-  content: string;
+  content: string | Array<{ type: string; text?: string; image_url?: { url: string; detail?: string } }>;
   tool_call_id?: string;
   tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>;
 }
@@ -224,10 +224,19 @@ export class OpenAIProvider implements LLMProviderAdapter {
   }
 
   private convertMessages(messages: LLMRequest['messages']): OpenAIMessage[] {
-    return messages.map(m => ({
-      role: m.role,
-      content: m.content,
-    }));
+    return messages.map(m => {
+      const msg: OpenAIMessage = { role: m.role, content: m.content };
+      if (m.tool_call_id) msg.tool_call_id = m.tool_call_id;
+      if (m.tool_calls) msg.tool_calls = m.tool_calls;
+      // Multimodal: if message has imageData, use content array format
+      if (m.imageData && m.role === 'user') {
+        msg.content = [
+          { type: 'text', text: m.content },
+          { type: 'image_url', image_url: { url: `data:${m.imageData.mimeType};base64,${m.imageData.base64}`, detail: 'auto' } },
+        ];
+      }
+      return msg;
+    });
   }
 
   private mapFinishReason(reason: string): LLMResponse['finishReason'] {

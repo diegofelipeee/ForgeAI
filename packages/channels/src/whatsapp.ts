@@ -4,6 +4,7 @@ import makeWASocket, {
   useMultiFileAuthState,
   DisconnectReason,
   makeInMemoryStore,
+  downloadMediaMessage,
   type WASocket,
 } from '@whiskeysockets/baileys';
 import { generateId } from '@forgeai/shared';
@@ -289,6 +290,32 @@ export class WhatsAppChannel extends BaseChannel {
 
         const pushName = msg.pushName ?? senderPhone;
 
+        // Download image if present (imageMessage)
+        let imageData: { base64: string; mimeType: string } | undefined;
+        if (msg.message?.imageMessage) {
+          try {
+            const buffer = await downloadMediaMessage(msg, 'buffer', {}) as Buffer;
+            const mime = msg.message.imageMessage.mimetype ?? 'image/jpeg';
+            imageData = { base64: buffer.toString('base64'), mimeType: mime };
+            this.logger.debug('Image downloaded', { size: buffer.length, mime });
+          } catch (err) {
+            this.logger.error('Failed to download WhatsApp image', err);
+          }
+        }
+
+        // Download audio if present (audioMessage)
+        let audioData: { buffer: Buffer; mimeType: string } | undefined;
+        if (msg.message?.audioMessage) {
+          try {
+            const buffer = await downloadMediaMessage(msg, 'buffer', {}) as Buffer;
+            const mime = msg.message.audioMessage.mimetype ?? 'audio/ogg; codecs=opus';
+            audioData = { buffer, mimeType: mime };
+            this.logger.debug('Audio downloaded', { size: buffer.length, mime });
+          } catch (err) {
+            this.logger.error('Failed to download WhatsApp audio', err);
+          }
+        }
+
         const inbound: InboundMessage = {
           id: generateId('wamsg'),
           channelType: 'whatsapp',
@@ -297,13 +324,15 @@ export class WhatsAppChannel extends BaseChannel {
           senderName: pushName,
           groupId: isGroup ? remoteJid : undefined,
           groupName: isGroup ? ((await this.getGroupName(remoteJid)) ?? undefined) : undefined,
-          content,
+          content: imageData && content === '[Image]' ? 'Analyze this image' : content,
+          image: imageData,
+          audio: audioData,
           replyToId: msg.message?.extendedTextMessage?.contextInfo?.stanzaId ?? undefined,
           timestamp: new Date((msg.messageTimestamp as number) * 1000),
           raw: msg as unknown as Record<string, unknown>,
         };
 
-        this.logger.debug('Inbound WhatsApp message', { senderPhone, pushName, isGroup });
+        this.logger.debug('Inbound WhatsApp message', { senderPhone, pushName, isGroup, hasImage: !!imageData, hasAudio: !!audioData });
         await this.handleInbound(inbound);
       }
     });

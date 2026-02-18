@@ -1,5 +1,5 @@
 import { Outlet, NavLink } from 'react-router-dom';
-import { LayoutDashboard, MessageSquare, Wrench, BarChart3, Shield, Settings, Flame, Store, Radio, Users, Brain, Mail, Database, Key, Webhook, CalendarDays } from 'lucide-react';
+import { LayoutDashboard, MessageSquare, Wrench, BarChart3, Shield, Settings, Flame, Store, Radio, Users, Brain, Mail, Database, Key, Webhook, CalendarDays, AudioLines } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const navItems = [
@@ -16,6 +16,7 @@ const navItems = [
   { to: '/api-keys', label: 'API Keys', icon: Key },
   { to: '/webhooks', label: 'Webhooks', icon: Webhook },
   { to: '/calendar', label: 'Calendar', icon: CalendarDays },
+  { to: '/voice', label: 'Voice', icon: AudioLines },
   { to: '/audit', label: 'Audit Log', icon: Shield },
   { to: '/settings', label: 'Settings', icon: Settings },
 ];

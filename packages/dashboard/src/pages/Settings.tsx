@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Key, Database, Shield, Cpu, Save, Check, Loader2, Eye, EyeOff, Trash2 } from 'lucide-react';
+import { Key, Database, Shield, Cpu, Save, Check, Loader2, Eye, EyeOff, Trash2, Image, AudioLines } from 'lucide-react';
 import { api, type ProviderInfo } from '@/lib/api';
 
 const PROVIDER_META: Record<string, { display: string; placeholder: string; models: string }> = {
@@ -199,6 +199,76 @@ export function SettingsPage() {
               </div>
             </div>
           ))}
+        </div>
+      </section>
+
+      {/* Image Generation */}
+      <section className="space-y-4">
+        <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+          <Image className="w-5 h-5 text-forge-400" />
+          Image Generation
+        </h2>
+        <div className="rounded-xl border border-zinc-800 divide-y divide-zinc-800">
+          <div className="flex items-center justify-between p-4">
+            <div>
+              <p className="text-sm text-white font-medium">DALL-E 3 (OpenAI)</p>
+              <p className="text-xs text-zinc-500">Uses your OpenAI API key — configure above</p>
+            </div>
+            <span className={`text-xs px-2 py-0.5 rounded-full ${
+              providers.find(p => p.name === 'openai')?.configured
+                ? 'bg-emerald-500/20 text-emerald-400'
+                : 'bg-zinc-700 text-zinc-400'
+            }`}>
+              {providers.find(p => p.name === 'openai')?.configured ? 'Ready' : 'Needs OpenAI key'}
+            </span>
+          </div>
+          <div className="flex items-center justify-between p-4">
+            <div>
+              <p className="text-sm text-white font-medium">Stable Diffusion (Local)</p>
+              <p className="text-xs text-zinc-500">AUTOMATIC1111 WebUI with --api flag</p>
+            </div>
+            <span className="text-xs px-2 py-0.5 rounded-full bg-zinc-700 text-zinc-400">
+              ENV: STABLE_DIFFUSION_URL
+            </span>
+          </div>
+        </div>
+        <p className="text-[10px] text-zinc-500">The <code className="text-zinc-400">image_generate</code> tool is available in the Tools page for testing</p>
+      </section>
+
+      {/* Voice Engine */}
+      <section className="space-y-4">
+        <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+          <AudioLines className="w-5 h-5 text-forge-400" />
+          Voice Engine
+        </h2>
+        <div className="rounded-xl border border-zinc-800 divide-y divide-zinc-800">
+          <div className="flex items-center justify-between p-4">
+            <div>
+              <p className="text-sm text-white font-medium">Text-to-Speech (TTS)</p>
+              <p className="text-xs text-zinc-500">OpenAI TTS · ElevenLabs</p>
+            </div>
+            <a href="/voice" className="text-xs px-3 py-1 rounded-lg bg-forge-500/20 text-forge-400 hover:bg-forge-500/30 transition-colors">
+              Configure →
+            </a>
+          </div>
+          <div className="flex items-center justify-between p-4">
+            <div>
+              <p className="text-sm text-white font-medium">Speech-to-Text (STT)</p>
+              <p className="text-xs text-zinc-500">OpenAI Whisper</p>
+            </div>
+            <a href="/voice" className="text-xs px-3 py-1 rounded-lg bg-forge-500/20 text-forge-400 hover:bg-forge-500/30 transition-colors">
+              Configure →
+            </a>
+          </div>
+          <div className="flex items-center justify-between p-4">
+            <div>
+              <p className="text-sm text-white font-medium">Channel Voice Messages</p>
+              <p className="text-xs text-zinc-500">Telegram & WhatsApp auto-transcribe voice</p>
+            </div>
+            <span className="text-xs px-2 py-0.5 rounded-full bg-zinc-700 text-zinc-400">
+              ENV: VOICE_ENABLED=true
+            </span>
+          </div>
         </div>
       </section>
 
