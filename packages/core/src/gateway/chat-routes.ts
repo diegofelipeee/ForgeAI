@@ -126,6 +126,10 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
       'DISCORD_BOT_TOKEN',
       'SLACK_BOT_TOKEN', 'SLACK_APP_TOKEN', 'SLACK_SIGNING_SECRET',
       'TEAMS_APP_ID', 'TEAMS_APP_PASSWORD',
+      'LEONARDO_API_KEY',
+      'ELEVENLABS_API_KEY',
+      'STABLE_DIFFUSION_URL',
+      'VOICE_ENABLED',
     ];
     for (const envKey of channelEnvKeys) {
       const vaultKey = `env:${envKey}`;
@@ -1450,6 +1454,77 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
     syncAgentToRouter();
     logger.info(`Provider ${name} key removed`, { name });
     return { success: true, provider: name, removed: true };
+  });
+
+  // ─── Service Keys (Leonardo, ElevenLabs, SD URL, Voice) ───
+  // Same pattern as LLM provider keys — saved to Vault, loaded to process.env
+
+  const SERVICE_KEYS_META = [
+    { name: 'leonardo', display: 'Leonardo AI', envKey: 'LEONARDO_API_KEY', type: 'key' as const },
+    { name: 'elevenlabs', display: 'ElevenLabs', envKey: 'ELEVENLABS_API_KEY', type: 'key' as const },
+    { name: 'stable-diffusion', display: 'Stable Diffusion', envKey: 'STABLE_DIFFUSION_URL', type: 'url' as const },
+    { name: 'voice-enabled', display: 'Voice Engine', envKey: 'VOICE_ENABLED', type: 'toggle' as const },
+  ];
+
+  // GET /api/services — list service configs status
+  app.get('/api/services', async () => {
+    return {
+      services: SERVICE_KEYS_META.map(s => ({
+        name: s.name,
+        display: s.display,
+        type: s.type,
+        configured: s.type === 'toggle'
+          ? process.env[s.envKey] === 'true'
+          : !!process.env[s.envKey],
+        value: s.type === 'toggle' ? process.env[s.envKey] === 'true' : undefined,
+      })),
+    };
+  });
+
+  // POST /api/services/:name — save service key/url/toggle
+  app.post('/api/services/:name', async (request: FastifyRequest) => {
+    const { name } = request.params as { name: string };
+    const { value } = request.body as { value: string };
+    const meta = SERVICE_KEYS_META.find(s => s.name === name);
+    if (!meta) return { error: `Unknown service: ${name}` };
+
+    if (!value && meta.type !== 'toggle') {
+      return { error: 'value is required' };
+    }
+
+    const trimmed = (value ?? '').trim();
+    process.env[meta.envKey] = trimmed;
+
+    if (vault?.isInitialized()) {
+      vault.set(`env:${meta.envKey}`, trimmed);
+    }
+
+    // If voice toggle changed, update voice engine
+    if (meta.name === 'voice-enabled' && voiceEngine) {
+      voiceEngine.setConfig({ enabled: trimmed === 'true' } as any);
+    }
+
+    logger.info(`Service ${name} configured via API`, { name, persisted: vault?.isInitialized() ?? false });
+    return { success: true, service: name, configured: true };
+  });
+
+  // DELETE /api/services/:name — remove service key
+  app.delete('/api/services/:name', async (request: FastifyRequest) => {
+    const { name } = request.params as { name: string };
+    const meta = SERVICE_KEYS_META.find(s => s.name === name);
+    if (!meta) return { error: `Unknown service: ${name}` };
+
+    delete process.env[meta.envKey];
+    if (vault?.isInitialized()) {
+      vault.delete(`env:${meta.envKey}`);
+    }
+
+    if (meta.name === 'voice-enabled' && voiceEngine) {
+      voiceEngine.setConfig({ enabled: false } as any);
+    }
+
+    logger.info(`Service ${name} key removed`, { name });
+    return { success: true, service: name, removed: true };
   });
 
   // ─── REST API: Tools ───────────────────────────────
