@@ -1978,6 +1978,21 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
     return { voices: await voiceEngine.listVoices() };
   });
 
+  app.put('/api/voice/config', async (request: FastifyRequest) => {
+    if (!voiceEngine) return { error: 'Voice not initialized' };
+    const body = request.body as {
+      enabled?: boolean;
+      ttsProvider?: string;
+      sttProvider?: string;
+      ttsVoice?: string;
+      ttsSpeed?: number;
+      language?: string;
+    };
+    voiceEngine.setConfig(body as any);
+    logger.info('Voice config updated', body);
+    return { config: voiceEngine.getConfig() };
+  });
+
   // ─── Webhook Manager ───────────────────────────────
 
   webhookManager = createWebhookManager();

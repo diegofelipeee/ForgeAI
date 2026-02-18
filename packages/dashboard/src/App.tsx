@@ -15,6 +15,7 @@ import { MemoryPage } from './pages/Memory';
 import { ApiKeysPage } from './pages/ApiKeys';
 import { WebhooksPage } from './pages/Webhooks';
 import { CalendarPage } from './pages/Calendar';
+import { VoicePage } from './pages/Voice';
 
 export function App() {
   return (
@@ -35,6 +36,7 @@ export function App() {
         <Route path="/api-keys" element={<ApiKeysPage />} />
         <Route path="/webhooks" element={<WebhooksPage />} />
         <Route path="/calendar" element={<CalendarPage />} />
+        <Route path="/voice" element={<VoicePage />} />
       </Route>
     </Routes>
   );
