@@ -142,6 +142,9 @@ export class OllamaProvider implements LLMProviderAdapter {
       model: request.model,
       messages,
       stream: false,
+      options: {
+        num_ctx: parseInt(process.env['OLLAMA_NUM_CTX'] || '2048', 10),
+      },
     };
 
     if (request.maxTokens) body['max_tokens'] = request.maxTokens;
@@ -259,6 +262,9 @@ export class OllamaProvider implements LLMProviderAdapter {
       model: request.model,
       messages,
       stream: true,
+      options: {
+        num_ctx: parseInt(process.env['OLLAMA_NUM_CTX'] || '2048', 10),
+      },
     };
 
     if (request.maxTokens) body['max_tokens'] = request.maxTokens;
