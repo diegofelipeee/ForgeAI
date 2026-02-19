@@ -90,7 +90,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
 
   // Load saved API keys from Vault and register providers
   if (vault?.isInitialized()) {
-    const { AnthropicProvider, OpenAIProvider, GoogleProvider, MoonshotProvider, MistralProvider, GroqProvider, DeepSeekProvider, XAIProvider } = await import('@forgeai/agent');
+    const { AnthropicProvider, OpenAIProvider, GoogleProvider, MoonshotProvider, MistralProvider, GroqProvider, DeepSeekProvider, XAIProvider, OllamaProvider } = await import('@forgeai/agent');
 
     const VAULT_PROVIDER_MAP: Array<{ envKey: string; name: string; factory: (key: string) => any }> = [
       { envKey: 'ANTHROPIC_API_KEY', name: 'anthropic', factory: (k) => new AnthropicProvider(k) },
@@ -117,6 +117,21 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
         } catch {
           logger.warn(`Failed to decrypt ${entry.envKey} from Vault`);
         }
+      }
+    }
+
+    // Restore Ollama provider from Vault (base URL + optional API key)
+    if (vaultKeys.includes('env:OLLAMA_BASE_URL')) {
+      try {
+        const ollamaUrl = vault.get('env:OLLAMA_BASE_URL');
+        const ollamaApiKey = vaultKeys.includes('env:OLLAMA_API_KEY') ? vault.get('env:OLLAMA_API_KEY') : undefined;
+        if (ollamaUrl) {
+          const ollamaProvider = new OllamaProvider(ollamaUrl, ollamaApiKey || undefined);
+          router.registerProvider(ollamaProvider);
+          logger.info('Loaded local (Ollama) from Vault', { url: ollamaUrl, auth: ollamaApiKey ? 'Bearer token' : 'none' });
+        }
+      } catch {
+        logger.warn('Failed to restore Ollama provider from Vault');
       }
     }
 
