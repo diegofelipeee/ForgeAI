@@ -123,6 +123,99 @@ class ElevenLabsTTSAdapter implements TTSAdapter {
   }
 }
 
+/** Piper TTS via VPS API — free, fast, Portuguese voice */
+class PiperTTSAdapter implements TTSAdapter {
+  readonly provider: TTSProvider = 'piper';
+
+  private getConfig() {
+    return {
+      baseUrl: (process.env.PIPER_API_URL || 'http://167.86.85.73:5051').replace(/\/+$/, ''),
+      apiKey: process.env.PIPER_API_KEY || process.env.STT_TTS_API_KEY || '',
+    };
+  }
+
+  isConfigured(): boolean {
+    const { baseUrl, apiKey } = this.getConfig();
+    return !!baseUrl && !!apiKey;
+  }
+
+  async synthesize(request: TTSRequest): Promise<TTSResponse> {
+    const start = Date.now();
+    const { baseUrl, apiKey } = this.getConfig();
+    if (!apiKey) throw new Error('PIPER_API_KEY or STT_TTS_API_KEY not configured');
+
+    const res = await fetch(`${baseUrl}/tts`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ text: request.text }),
+    });
+
+    if (!res.ok) throw new Error(`Piper TTS error: ${res.status} ${await res.text()}`);
+
+    const audio = Buffer.from(await res.arrayBuffer());
+    return {
+      audio,
+      format: 'wav',
+      durationMs: Date.now() - start,
+      provider: 'piper',
+      charCount: request.text.length,
+    };
+  }
+
+  async listVoices() {
+    return [
+      { id: 'faber', name: 'Faber (PT-BR)', language: 'pt-BR' },
+    ];
+  }
+}
+
+/** Whisper STT via VPS API — free, faster-whisper on VPS */
+class VPSWhisperSTTAdapter implements STTAdapter {
+  readonly provider: STTProvider = 'whisper-vps';
+
+  private getConfig() {
+    return {
+      baseUrl: (process.env.WHISPER_API_URL || 'http://167.86.85.73:5051').replace(/\/+$/, ''),
+      apiKey: process.env.WHISPER_API_KEY || process.env.STT_TTS_API_KEY || '',
+    };
+  }
+
+  isConfigured(): boolean {
+    const { baseUrl, apiKey } = this.getConfig();
+    return !!baseUrl && !!apiKey;
+  }
+
+  async transcribe(request: STTRequest): Promise<STTResponse> {
+    const start = Date.now();
+    const { baseUrl, apiKey } = this.getConfig();
+    if (!apiKey) throw new Error('WHISPER_API_KEY or STT_TTS_API_KEY not configured');
+
+    const formData = new FormData();
+    const blob = new Blob([request.audio], { type: `audio/${request.format ?? 'ogg'}` });
+    formData.append('audio', blob, `audio.${request.format ?? 'ogg'}`);
+
+    const res = await fetch(`${baseUrl}/stt`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}` },
+      body: formData,
+    });
+
+    if (!res.ok) throw new Error(`Whisper VPS error: ${res.status} ${await res.text()}`);
+
+    const data = await res.json() as { text: string; language?: string };
+    return {
+      text: data.text,
+      confidence: 0.95,
+      language: data.language ?? request.language ?? 'pt',
+      durationMs: Date.now() - start,
+      provider: 'whisper-vps',
+    };
+  }
+}
+
 class OpenAISTTAdapter implements STTAdapter {
   readonly provider: STTProvider = 'whisper';
 
@@ -276,9 +369,11 @@ export class VoiceEngine {
 
     this.ttsAdapters.set('openai', new OpenAITTSAdapter());
     this.ttsAdapters.set('elevenlabs', new ElevenLabsTTSAdapter());
+    this.ttsAdapters.set('piper', new PiperTTSAdapter());
     this.sttAdapters.set('whisper', new OpenAISTTAdapter());
     this.sttAdapters.set('openai', new OpenAISTTAdapter());
     this.sttAdapters.set('whisper-local', new LocalWhisperSTTAdapter());
+    this.sttAdapters.set('whisper-vps', new VPSWhisperSTTAdapter());
 
     logger.info('Voice engine initialized', { tts: this.config.ttsProvider, stt: this.config.sttProvider });
   }
@@ -295,14 +390,87 @@ export class VoiceEngine {
     Object.assign(this.config, update);
   }
 
+  /** Strip markdown, emojis, tables, code blocks etc. for clean TTS reading */
+  sanitizeForTTS(text: string): string {
+    let clean = text;
+
+    // Remove code blocks (```...```)
+    clean = clean.replace(/```[\s\S]*?```/g, '');
+
+    // Remove inline code (`...`)
+    clean = clean.replace(/`([^`]+)`/g, '$1');
+
+    // Remove markdown tables (lines starting with |)
+    clean = clean.replace(/^\|.*\|$/gm, '');
+    // Remove table separator lines (|---|---|)
+    clean = clean.replace(/^\s*\|?\s*[-:]+\s*(\|\s*[-:]+\s*)+\|?\s*$/gm, '');
+
+    // Remove horizontal rules (---, ***, ___)
+    clean = clean.replace(/^[\s]*[-*_]{3,}[\s]*$/gm, '');
+
+    // Remove headings markers (# ## ### etc.) but keep the text
+    clean = clean.replace(/^#{1,6}\s+/gm, '');
+
+    // Remove bold/italic markers but keep text
+    clean = clean.replace(/\*\*\*(.+?)\*\*\*/g, '$1');
+    clean = clean.replace(/\*\*(.+?)\*\*/g, '$1');
+    clean = clean.replace(/\*(.+?)\*/g, '$1');
+    clean = clean.replace(/__(.+?)__/g, '$1');
+    clean = clean.replace(/_(.+?)_/g, '$1');
+    clean = clean.replace(/~~(.+?)~~/g, '$1');
+
+    // Remove markdown links [text](url) → text
+    clean = clean.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+
+    // Remove images ![alt](url)
+    clean = clean.replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1');
+
+    // Remove emojis (Unicode emoji ranges)
+    clean = clean.replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{200D}\u{20E3}\u{FE0F}]/gu, '');
+
+    // Remove bullet markers (- , * , + ) at start of line but keep text
+    clean = clean.replace(/^\s*[-*+]\s+/gm, '');
+
+    // Remove numbered list markers (1. 2. etc.)
+    clean = clean.replace(/^\s*\d+\.\s+/gm, '');
+
+    // Remove blockquote markers
+    clean = clean.replace(/^\s*>\s?/gm, '');
+
+    // Remove HTML tags
+    clean = clean.replace(/<[^>]+>/g, '');
+
+    // Remove arrows (→, ←, ↓, ↑)
+    clean = clean.replace(/[→←↓↑]/g, '');
+
+    // Collapse multiple newlines into one pause
+    clean = clean.replace(/\n{2,}/g, '\n');
+
+    // Remove lines that are empty or only whitespace
+    clean = clean.split('\n').filter(l => l.trim().length > 0).join('. ');
+
+    // Clean up multiple spaces
+    clean = clean.replace(/\s{2,}/g, ' ');
+
+    // Clean up multiple periods/dots
+    clean = clean.replace(/\.{2,}/g, '.');
+    clean = clean.replace(/\.\s*\./g, '.');
+
+    return clean.trim();
+  }
+
   async speak(text: string, options?: Partial<TTSRequest>): Promise<TTSResponse> {
     const provider = options?.provider ?? this.config.ttsProvider;
     const adapter = this.ttsAdapters.get(provider);
     if (!adapter) throw new Error(`TTS provider '${provider}' not registered`);
     if (!adapter.isConfigured()) throw new Error(`TTS provider '${provider}' not configured (missing API key)`);
 
+    // Sanitize text for clean TTS reading
+    const cleanText = this.sanitizeForTTS(text);
+    logger.debug('TTS sanitized', { original: text.length, clean: cleanText.length });
+
     return adapter.synthesize({
-      text,
+      text: cleanText,
       provider,
       voice: options?.voice ?? this.config.ttsVoice,
       speed: options?.speed ?? this.config.ttsSpeed,

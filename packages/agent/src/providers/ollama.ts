@@ -158,20 +158,16 @@ export class OllamaProvider implements LLMProviderAdapter {
       }));
     }
 
-    logger.debug('Request', { model: request.model, endpoint: this.baseUrl, tools: request.tools?.length ?? 0 });
+    logger.debug('Request', { model: request.model, endpoint: this.baseUrl, tools: request.tools?.length ?? 0, num_ctx: (body.options as any)?.num_ctx });
 
-    // Try OpenAI-compatible endpoint first (better tool support)
-    try {
-      return await this.chatOpenAICompat(body, request);
-    } catch (compatErr) {
-      // If OpenAI endpoint fails, fall back to native Ollama /api/chat
-      if (request.tools && request.tools.length > 0) {
-        // Tools require OpenAI-compatible mode — can't fall back
-        throw compatErr;
-      }
-      logger.debug('OpenAI-compatible endpoint failed, trying native Ollama', { error: (compatErr as Error).message });
-      return this.chatNative(body, request);
+    // Use OpenAI-compatible endpoint only when tools are needed (better tool support)
+    // Otherwise use native /api/chat which properly supports num_ctx for CPU optimization
+    if (request.tools && request.tools.length > 0) {
+      return this.chatOpenAICompat(body, request);
     }
+
+    // Native endpoint supports num_ctx option for faster CPU inference
+    return this.chatNative(body, request);
   }
 
   private async chatOpenAICompat(body: Record<string, unknown>, request: LLMRequest): Promise<LLMResponse> {

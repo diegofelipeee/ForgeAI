@@ -148,6 +148,9 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
       'OLLAMA_BASE_URL',
       'SECURITY_WEBHOOK_URL',
       'RBAC_ENFORCE',
+      'STT_TTS_API_KEY',
+      'WHISPER_API_URL',
+      'PIPER_API_URL',
     ];
     for (const envKey of channelEnvKeys) {
       const vaultKey = `env:${envKey}`;
@@ -786,6 +789,18 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
           content: tgContent,
           replyToId: inbound.channelMessageId,
         });
+
+        // Send TTS audio response if original was voice message
+        if (isVoiceMessage && voiceEngine?.isEnabled() && responseContent) {
+          try {
+            const ttsResult = await voiceEngine.speak(responseContent.substring(0, 4000));
+            const audioBuffer = Buffer.isBuffer(ttsResult.audio) ? ttsResult.audio : Buffer.from(ttsResult.audio);
+            await telegramChannel!.sendVoice(chatId, audioBuffer, undefined, inbound.channelMessageId);
+            logger.info('TTS voice response sent (Telegram)', { chars: responseContent.length, format: ttsResult.format });
+          } catch (ttsErr) {
+            logger.error('TTS response failed (Telegram)', ttsErr);
+          }
+        }
       });
 
       await telegramChannel.connect();
@@ -1628,6 +1643,9 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
     { name: 'voice-enabled', display: 'Voice Engine', envKey: 'VOICE_ENABLED', type: 'toggle' as const },
     { name: 'security-webhook', display: 'Security Webhook', envKey: 'SECURITY_WEBHOOK_URL', type: 'url' as const },
     { name: 'rbac-enforce', display: 'RBAC Hard Enforcement', envKey: 'RBAC_ENFORCE', type: 'toggle' as const },
+    { name: 'stt-tts-api', display: 'VPS STT/TTS (Whisper+Piper)', envKey: 'STT_TTS_API_KEY', type: 'key' as const },
+    { name: 'whisper-api-url', display: 'VPS Whisper URL', envKey: 'WHISPER_API_URL', type: 'url' as const },
+    { name: 'piper-api-url', display: 'VPS Piper URL', envKey: 'PIPER_API_URL', type: 'url' as const },
   ];
 
   // GET /api/services — list service configs status
@@ -2207,6 +2225,18 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
     enabled: process.env.VOICE_ENABLED === 'true',
   });
 
+  // Restore voice config from Vault
+  if (vault?.isInitialized()) {
+    try {
+      const savedVoiceConfig = vault.get('config:voice');
+      if (savedVoiceConfig) {
+        const parsed = JSON.parse(savedVoiceConfig);
+        voiceEngine.setConfig(parsed);
+        logger.info('Voice config restored from Vault', parsed);
+      }
+    } catch { /* ignore parse errors */ }
+  }
+
   app.get('/api/voice/config', async () => {
     if (!voiceEngine) return { error: 'Voice not initialized' };
     return { config: voiceEngine.getConfig(), providers: voiceEngine.getAvailableProviders() };
@@ -2228,8 +2258,32 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
       language?: string;
     };
     voiceEngine.setConfig(body as any);
+
+    // Persist voice config to Vault
+    if (vault?.isInitialized()) {
+      const fullConfig = voiceEngine.getConfig();
+      vault.set('config:voice', JSON.stringify(fullConfig));
+    }
+
     logger.info('Voice config updated', body);
     return { config: voiceEngine.getConfig() };
+  });
+
+  // ─── Language Setting ──────────────────────────────
+
+  app.get('/api/settings/language', async () => {
+    const lang = vault?.isInitialized() ? (vault.get('config:language') ?? 'en') : 'en';
+    return { language: lang };
+  });
+
+  app.put('/api/settings/language', async (request: FastifyRequest) => {
+    const body = request.body as { language?: string };
+    const lang = body.language ?? 'en';
+    if (vault?.isInitialized()) {
+      vault.set('config:language', lang);
+    }
+    logger.info('Language updated', { language: lang });
+    return { language: lang };
   });
 
   // ─── Webhook Manager ───────────────────────────────

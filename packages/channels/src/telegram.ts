@@ -480,6 +480,19 @@ export class TelegramChannel extends BaseChannel {
     }
   }
 
+  async sendVoice(chatId: string, audioBuffer: Buffer, caption?: string, replyToId?: string): Promise<void> {
+    try {
+      const { InputFile } = await import('grammy');
+      await this.bot.api.sendVoice(chatId, new InputFile(audioBuffer, 'voice.ogg'), {
+        caption: caption ? caption.substring(0, 1024) : undefined,
+        reply_parameters: replyToId ? { message_id: Number(replyToId) } : undefined,
+      });
+      this.logger.debug('Voice sent', { chatId, size: audioBuffer.length });
+    } catch (error) {
+      this.logger.error('Failed to send voice', error, { chatId });
+    }
+  }
+
   async sendPhoto(chatId: string, filePath: string, caption?: string): Promise<void> {
     try {
       const { InputFile } = await import('grammy');

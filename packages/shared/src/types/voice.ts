@@ -1,5 +1,5 @@
-export type TTSProvider = 'elevenlabs' | 'openai' | 'browser';
-export type STTProvider = 'whisper' | 'whisper-local' | 'openai' | 'browser';
+export type TTSProvider = 'elevenlabs' | 'openai' | 'browser' | 'piper';
+export type STTProvider = 'whisper' | 'whisper-local' | 'whisper-vps' | 'openai' | 'browser';
 
 export interface TTSRequest {
   text: string;

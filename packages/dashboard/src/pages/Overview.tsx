@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Activity, Shield, Cpu, Clock, Zap, Lock, Radio, Eye, Bot, DollarSign, MessageSquare, BarChart3, PlayCircle, Signal, AlertTriangle, ChevronDown, ChevronUp, Thermometer, Brain, Wrench, Container, Terminal } from 'lucide-react';
 import { api, type HealthData, type InfoData, type ProviderInfo } from '@/lib/api';
+import { useI18n } from '@/lib/i18n';
 
 interface AutopilotStatus {
   enabled: boolean;
@@ -61,6 +62,7 @@ interface SecuritySummary {
 }
 
 export function OverviewPage() {
+  const { t } = useI18n();
   const [health, setHealth] = useState<HealthData | null>(null);
   const [info, setInfo] = useState<InfoData | null>(null);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
@@ -105,9 +107,9 @@ export function OverviewPage() {
     return (
       <div className="p-8">
         <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-8 text-center">
-          <div className="text-red-400 text-lg font-semibold mb-2">Gateway Offline</div>
+          <div className="text-red-400 text-lg font-semibold mb-2">{t('overview.gatewayOffline')}</div>
           <p className="text-zinc-400 text-sm">{error}</p>
-          <p className="text-zinc-500 text-xs mt-2">Make sure the gateway is running: <code className="text-forge-400">forge start</code></p>
+          <p className="text-zinc-500 text-xs mt-2">{t('overview.gatewayHint')} <code className="text-forge-400">forge start</code></p>
         </div>
       </div>
     );
@@ -121,40 +123,40 @@ export function OverviewPage() {
     <div className="p-8 space-y-8">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-white">Overview</h1>
-        <p className="text-sm text-zinc-400 mt-1">ForgeAI Gateway real-time monitoring</p>
+        <h1 className="text-2xl font-bold text-white">{t('overview.title')}</h1>
+        <p className="text-sm text-zinc-400 mt-1">{t('overview.subtitle')}</p>
       </div>
 
       {/* Status Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatusCard
-          title="Status"
-          value={health?.status === 'healthy' ? 'Healthy' : 'Unknown'}
+          title={t('overview.status')}
+          value={health?.status === 'healthy' ? t('overview.healthy') : t('overview.unknown')}
           icon={<Activity className="w-5 h-5" />}
           status={health?.status === 'healthy' ? 'healthy' : 'warning'}
           subtitle={`v${health?.version ?? '—'}`}
         />
         <StatusCard
-          title="Uptime"
+          title={t('overview.uptime')}
           value={health ? formatUptime(health.uptime) : '—'}
           icon={<Clock className="w-5 h-5" />}
           status="healthy"
         />
         <div onClick={() => setSecurityExpanded(!securityExpanded)} className="cursor-pointer">
           <StatusCard
-            title="Security Modules"
+            title={t('overview.securityModules')}
             value={`${securityModules}/7`}
             icon={<Shield className="w-5 h-5" />}
             status={securityModules === 7 ? 'healthy' : 'warning'}
-            subtitle={securityExpanded ? '▲ Clique para fechar' : '▼ Clique para detalhes'}
+            subtitle={securityExpanded ? `▲ ${t('overview.clickClose')}` : `▼ ${t('overview.clickDetails')}`}
           />
         </div>
         <StatusCard
-          title="LLM Providers"
+          title={t('overview.llmProviders')}
           value={providers.filter(p => p.configured).length}
           icon={<Cpu className="w-5 h-5" />}
           status={providers.some(p => p.configured) ? 'healthy' : 'error'}
-          subtitle={providers.filter(p => p.configured).map(p => p.name).join(', ') || 'None configured'}
+          subtitle={providers.filter(p => p.configured).map(p => p.name).join(', ') || t('overview.noneConfigured')}
         />
       </div>
 
@@ -163,9 +165,9 @@ export function OverviewPage() {
         <div className="rounded-xl border border-zinc-800 bg-zinc-950/50 p-5 space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-white flex items-center gap-2">
-              <Shield className="w-4 h-4 text-forge-400" /> Security Modules — Detalhes
+              <Shield className="w-4 h-4 text-forge-400" /> {t('overview.securityDetails')}
             </h2>
-            <button onClick={() => setSecurityExpanded(false)} title="Fechar" className="text-zinc-500 hover:text-zinc-300">
+            <button onClick={() => setSecurityExpanded(false)} title={t('overview.close')} className="text-zinc-500 hover:text-zinc-300">
               <ChevronUp className="w-4 h-4" />
             </button>
           </div>
@@ -175,7 +177,7 @@ export function OverviewPage() {
                 <p className="text-xs font-medium text-white">{m.name}</p>
                 <p className="text-[10px] text-zinc-500 mt-0.5">{m.description}</p>
                 <span className={`inline-block mt-1 text-[9px] px-1.5 py-0.5 rounded-full ${m.active ? 'bg-emerald-500/20 text-emerald-400' : 'bg-zinc-700 text-zinc-500'}`}>
-                  {m.active ? 'Ativo' : 'Inativo'}
+                  {m.active ? t('overview.active') : t('overview.inactive')}
                 </span>
               </div>
             ))}
@@ -184,7 +186,7 @@ export function OverviewPage() {
           {/* Recent Security Events */}
           {securitySummary.events.length > 0 && (
             <div className="border-t border-zinc-800 pt-3">
-              <h3 className="text-xs font-semibold text-zinc-400 mb-2">Eventos Recentes</h3>
+              <h3 className="text-xs font-semibold text-zinc-400 mb-2">{t('overview.recentEvents')}</h3>
               <div className="space-y-1 max-h-48 overflow-y-auto">
                 {securitySummary.events.map(ev => (
                   <div key={ev.id} className="flex items-center justify-between text-xs px-2 py-1.5 rounded bg-zinc-900/50">
@@ -204,7 +206,7 @@ export function OverviewPage() {
             </div>
           )}
           {securitySummary.events.length === 0 && (
-            <p className="text-xs text-zinc-600 text-center py-2">Nenhum evento de segurança recente — tudo limpo ✓</p>
+            <p className="text-xs text-zinc-600 text-center py-2">{t('overview.noSecurityEvents')} ✓</p>
           )}
         </div>
       )}
@@ -213,37 +215,37 @@ export function OverviewPage() {
       {securitySummary && (securitySummary.counts.promptGuardBlocks > 0 || securitySummary.counts.rateLimitTriggered > 0 || securitySummary.counts.sandboxViolations > 0 || securitySummary.counts.authFailures > 0 || securitySummary.counts.toolBlocked > 0) && (
         <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
           <h2 className="text-sm font-semibold text-amber-400 flex items-center gap-2 mb-2">
-            <AlertTriangle className="w-4 h-4" /> Alertas de Segurança
+            <AlertTriangle className="w-4 h-4" /> {t('overview.securityAlerts')}
           </h2>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2">
             {securitySummary.counts.promptGuardBlocks > 0 && (
               <div className="flex items-center gap-2 text-xs text-amber-300 bg-amber-500/10 rounded-lg px-3 py-2">
                 <Eye className="w-3.5 h-3.5" />
-                <span>{securitySummary.counts.promptGuardBlocks} prompt guard block(s)</span>
+                <span>{securitySummary.counts.promptGuardBlocks} {t('overview.promptGuardBlocks')}</span>
               </div>
             )}
             {securitySummary.counts.rateLimitTriggered > 0 && (
               <div className="flex items-center gap-2 text-xs text-amber-300 bg-amber-500/10 rounded-lg px-3 py-2">
                 <Zap className="w-3.5 h-3.5" />
-                <span>{securitySummary.counts.rateLimitTriggered} rate limit(s)</span>
+                <span>{securitySummary.counts.rateLimitTriggered} {t('overview.rateLimits')}</span>
               </div>
             )}
             {securitySummary.counts.sandboxViolations > 0 && (
               <div className="flex items-center gap-2 text-xs text-red-300 bg-red-500/10 rounded-lg px-3 py-2">
                 <Container className="w-3.5 h-3.5" />
-                <span>{securitySummary.counts.sandboxViolations} sandbox violation(s)</span>
+                <span>{securitySummary.counts.sandboxViolations} {t('overview.sandboxViolations')}</span>
               </div>
             )}
             {securitySummary.counts.authFailures > 0 && (
               <div className="flex items-center gap-2 text-xs text-red-300 bg-red-500/10 rounded-lg px-3 py-2">
                 <Lock className="w-3.5 h-3.5" />
-                <span>{securitySummary.counts.authFailures} auth failure(s)</span>
+                <span>{securitySummary.counts.authFailures} {t('overview.authFailures')}</span>
               </div>
             )}
             {securitySummary.counts.toolBlocked > 0 && (
               <div className="flex items-center gap-2 text-xs text-amber-300 bg-amber-500/10 rounded-lg px-3 py-2">
                 <Wrench className="w-3.5 h-3.5" />
-                <span>{securitySummary.counts.toolBlocked} tool(s) blocked</span>
+                <span>{securitySummary.counts.toolBlocked} {t('overview.toolsBlocked')}</span>
               </div>
             )}
           </div>
@@ -256,26 +258,26 @@ export function OverviewPage() {
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold text-white flex items-center gap-2">
               <PlayCircle className={`w-4 h-4 ${autopilot.running ? 'text-blue-400' : 'text-zinc-500'}`} />
-              Autopilot
+              {t('overview.autopilot')}
             </h2>
             <span className={`text-[10px] px-2 py-0.5 rounded-full ${
               autopilot.running ? 'bg-blue-500/20 text-blue-400' : 'bg-zinc-700 text-zinc-500'
             }`}>
-              {autopilot.running ? 'Rodando' : 'Parado'}
+              {autopilot.running ? t('overview.running') : t('overview.stopped')}
             </span>
           </div>
           <div className="grid grid-cols-3 gap-4 text-center">
             <div>
               <p className="text-lg font-bold text-white">{autopilot.taskCount}</p>
-              <p className="text-[10px] text-zinc-500">Tarefas</p>
+              <p className="text-[10px] text-zinc-500">{t('overview.tasks')}</p>
             </div>
             <div>
               <p className="text-lg font-bold text-white">{autopilot.intervalMinutes}min</p>
-              <p className="text-[10px] text-zinc-500">Intervalo</p>
+              <p className="text-[10px] text-zinc-500">{t('overview.interval')}</p>
             </div>
             <div>
               <p className="text-lg font-bold text-zinc-400">{autopilot.lastCheck ? new Date(autopilot.lastCheck).toLocaleTimeString() : '—'}</p>
-              <p className="text-[10px] text-zinc-500">Último check</p>
+              <p className="text-[10px] text-zinc-500">{t('overview.lastCheck')}</p>
             </div>
           </div>
           {autopilot.tasks && autopilot.tasks.length > 0 && (
@@ -287,7 +289,7 @@ export function OverviewPage() {
                 </div>
               ))}
               {autopilot.tasks.length > 5 && (
-                <p className="text-[10px] text-zinc-600">+{autopilot.tasks.length - 5} mais...</p>
+                <p className="text-[10px] text-zinc-600">+{autopilot.tasks.length - 5} {t('overview.more')}</p>
               )}
             </div>
           )}
@@ -305,21 +307,21 @@ export function OverviewPage() {
             <span className={`text-[10px] px-2 py-0.5 rounded-full ${
               otelStatus.enabled ? 'bg-emerald-500/20 text-emerald-400' : 'bg-zinc-700 text-zinc-500'
             }`}>
-              {otelStatus.enabled ? 'Ativo' : 'Desativado'}
+              {otelStatus.enabled ? t('overview.enabled') : t('overview.disabled')}
             </span>
           </div>
           <div className="grid grid-cols-3 gap-4 text-center">
             <div>
               <p className="text-lg font-bold text-white">{otelStatus.spansCollected}</p>
-              <p className="text-[10px] text-zinc-500">Spans</p>
+              <p className="text-[10px] text-zinc-500">{t('overview.spans')}</p>
             </div>
             <div>
               <p className="text-lg font-bold text-white">{otelStatus.metricsCollected}</p>
-              <p className="text-[10px] text-zinc-500">Metrics</p>
+              <p className="text-[10px] text-zinc-500">{t('overview.metrics')}</p>
             </div>
             <div>
               <p className="text-lg font-bold text-white">{Object.keys(otelStatus.counters ?? {}).length}</p>
-              <p className="text-[10px] text-zinc-500">Counters</p>
+              <p className="text-[10px] text-zinc-500">{t('overview.counters')}</p>
             </div>
           </div>
         </div>
@@ -330,7 +332,7 @@ export function OverviewPage() {
         <div>
           <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
             <Bot className="w-5 h-5 text-forge-400" />
-            Agente Ativo
+            {t('overview.activeAgent')}
           </h2>
 
           {/* Agent info banner — enhanced */}
@@ -345,39 +347,39 @@ export function OverviewPage() {
                   <p className="text-xs text-zinc-400 font-mono">{agentStats.agent.model}</p>
                 </div>
               </div>
-              <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400">Online</span>
+              <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400">{t('overview.online')}</span>
             </div>
 
             {/* Agent details grid */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2 pt-2 border-t border-forge-500/10">
               <div className="flex items-center gap-2 text-xs">
                 <Brain className="w-3.5 h-3.5 text-purple-400" />
-                <span className="text-zinc-500">Thinking:</span>
+                <span className="text-zinc-500">{t('overview.thinking')}</span>
                 <span className={`font-medium ${
                   agentStats.agent.thinkingLevel === 'off' ? 'text-zinc-400' :
                   agentStats.agent.thinkingLevel === 'low' ? 'text-blue-400' :
                   agentStats.agent.thinkingLevel === 'medium' ? 'text-amber-400' : 'text-red-400'
                 }`}>
-                  {agentStats.agent.thinkingLevel === 'off' ? 'Desligado' :
-                   agentStats.agent.thinkingLevel === 'low' ? 'Leve' :
-                   agentStats.agent.thinkingLevel === 'medium' ? 'Médio' : 'Profundo'}
+                  {agentStats.agent.thinkingLevel === 'off' ? t('overview.thinkingOff') :
+                   agentStats.agent.thinkingLevel === 'low' ? t('overview.thinkingLow') :
+                   agentStats.agent.thinkingLevel === 'medium' ? t('overview.thinkingMedium') : t('overview.thinkingDeep')}
                 </span>
               </div>
               <div className="flex items-center gap-2 text-xs">
                 <Thermometer className="w-3.5 h-3.5 text-orange-400" />
-                <span className="text-zinc-500">Temp:</span>
+                <span className="text-zinc-500">{t('overview.temp')}</span>
                 <span className="text-zinc-200 font-mono">{agentStats.agent.temperature ?? 0.7}</span>
               </div>
               <div className="flex items-center gap-2 text-xs">
                 <Terminal className="w-3.5 h-3.5 text-cyan-400" />
-                <span className="text-zinc-500">Tools:</span>
-                <span className="text-zinc-200">{agentStats.toolCount ?? 0} habilitadas</span>
+                <span className="text-zinc-500">{t('overview.tools')}</span>
+                <span className="text-zinc-200">{agentStats.toolCount ?? 0} {t('overview.toolsEnabled')}</span>
               </div>
               <div className="flex items-center gap-2 text-xs">
                 <Container className="w-3.5 h-3.5 text-blue-400" />
-                <span className="text-zinc-500">Sandbox:</span>
+                <span className="text-zinc-500">{t('overview.sandbox')}</span>
                 <span className={`font-medium ${agentStats.sandboxStatus === 'available' ? 'text-emerald-400' : 'text-zinc-500'}`}>
-                  {agentStats.sandboxStatus === 'available' ? 'Docker ✓' : 'Indisponível'}
+                  {agentStats.sandboxStatus === 'available' ? 'Docker ✓' : t('overview.sandboxUnavailable')}
                 </span>
               </div>
             </div>
@@ -385,9 +387,9 @@ export function OverviewPage() {
             {/* Tools list (collapsible) */}
             {agentStats.tools && agentStats.tools.length > 0 && (
               <div className="flex flex-wrap gap-1 pt-1">
-                {agentStats.tools.map(t => (
-                  <span key={t} className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400 border border-zinc-700">
-                    {t}
+                {agentStats.tools.map(tool => (
+                  <span key={tool} className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400 border border-zinc-700">
+                    {tool}
                   </span>
                 ))}
               </div>
@@ -398,14 +400,14 @@ export function OverviewPage() {
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
             <div className="bg-zinc-950/50 border border-zinc-800 rounded-xl p-4">
               <div className="flex items-center gap-1.5 text-zinc-500 text-[10px] font-medium mb-1">
-                <MessageSquare className="w-3 h-3" /> SESSÕES ATIVAS
+                <MessageSquare className="w-3 h-3" /> {t('overview.activeSessions')}
               </div>
               <p className="text-xl font-bold text-white">{agentStats.activeSessions}</p>
-              <p className="text-[10px] text-zinc-500">{agentStats.totalSessions} total salvas</p>
+              <p className="text-[10px] text-zinc-500">{agentStats.totalSessions} {t('overview.totalSaved')}</p>
             </div>
             <div className="bg-zinc-950/50 border border-zinc-800 rounded-xl p-4">
               <div className="flex items-center gap-1.5 text-zinc-500 text-[10px] font-medium mb-1">
-                <DollarSign className="w-3 h-3" /> CUSTO TOTAL
+                <DollarSign className="w-3 h-3" /> {t('overview.totalCost')}
               </div>
               <p className="text-xl font-bold text-emerald-400">
                 ${agentStats.usage.totalCost < 0.01 ? agentStats.usage.totalCost.toFixed(6) : agentStats.usage.totalCost.toFixed(4)}
@@ -413,7 +415,7 @@ export function OverviewPage() {
             </div>
             <div className="bg-zinc-950/50 border border-zinc-800 rounded-xl p-4">
               <div className="flex items-center gap-1.5 text-zinc-500 text-[10px] font-medium mb-1">
-                <BarChart3 className="w-3 h-3" /> TOKENS USADOS
+                <BarChart3 className="w-3 h-3" /> {t('overview.tokensUsed')}
               </div>
               <p className="text-xl font-bold text-white">
                 {agentStats.usage.totalTokens >= 1000 ? `${(agentStats.usage.totalTokens / 1000).toFixed(1)}k` : agentStats.usage.totalTokens}
@@ -421,7 +423,7 @@ export function OverviewPage() {
             </div>
             <div className="bg-zinc-950/50 border border-zinc-800 rounded-xl p-4">
               <div className="flex items-center gap-1.5 text-zinc-500 text-[10px] font-medium mb-1">
-                <Zap className="w-3 h-3" /> REQUISIÇÕES
+                <Zap className="w-3 h-3" /> {t('overview.requests')}
               </div>
               <p className="text-xl font-bold text-white">{agentStats.usage.totalRequests}</p>
             </div>
@@ -431,7 +433,7 @@ export function OverviewPage() {
           {Object.keys(agentStats.usage.byProvider).length > 0 && (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-4">
               <div className="bg-zinc-950/50 border border-zinc-800 rounded-xl p-4">
-                <h4 className="text-xs font-semibold text-zinc-400 mb-3">Por Provider</h4>
+                <h4 className="text-xs font-semibold text-zinc-400 mb-3">{t('overview.byProvider')}</h4>
                 <div className="space-y-2">
                   {Object.entries(agentStats.usage.byProvider).map(([provider, data]) => (
                     <div key={provider} className="flex items-center justify-between text-xs">
@@ -446,7 +448,7 @@ export function OverviewPage() {
                 </div>
               </div>
               <div className="bg-zinc-950/50 border border-zinc-800 rounded-xl p-4">
-                <h4 className="text-xs font-semibold text-zinc-400 mb-3">Por Modelo</h4>
+                <h4 className="text-xs font-semibold text-zinc-400 mb-3">{t('overview.byModel')}</h4>
                 <div className="space-y-2">
                   {Object.entries(agentStats.usage.byModel).map(([model, data]) => (
                     <div key={model} className="flex items-center justify-between text-xs">
@@ -466,18 +468,18 @@ export function OverviewPage() {
           {agentStats.sessions.length > 0 && (
             <div className="bg-zinc-950/50 border border-zinc-800 rounded-xl overflow-hidden">
               <div className="px-4 py-3 border-b border-zinc-800">
-                <h4 className="text-xs font-semibold text-zinc-400">Custo por Sessão</h4>
+                <h4 className="text-xs font-semibold text-zinc-400">{t('overview.costPerSession')}</h4>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="border-b border-zinc-800 text-zinc-500">
-                      <th className="px-4 py-2 text-left font-medium">Sessão</th>
-                      <th className="px-4 py-2 text-right font-medium">Msgs</th>
-                      <th className="px-4 py-2 text-right font-medium">Reqs</th>
-                      <th className="px-4 py-2 text-right font-medium">Tokens</th>
-                      <th className="px-4 py-2 text-right font-medium">Custo</th>
-                      <th className="px-4 py-2 text-right font-medium">Última atividade</th>
+                      <th className="px-4 py-2 text-left font-medium">{t('overview.session')}</th>
+                      <th className="px-4 py-2 text-right font-medium">{t('overview.msgs')}</th>
+                      <th className="px-4 py-2 text-right font-medium">{t('overview.reqs')}</th>
+                      <th className="px-4 py-2 text-right font-medium">{t('overview.tokens')}</th>
+                      <th className="px-4 py-2 text-right font-medium">{t('overview.cost')}</th>
+                      <th className="px-4 py-2 text-right font-medium">{t('overview.lastActivity')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -505,10 +507,10 @@ export function OverviewPage() {
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-white flex items-center gap-2">
               <Shield className="w-5 h-5 text-forge-400" />
-              Security Layer
+              {t('overview.securityLayer')}
             </h2>
-            <button onClick={() => setSecurityExpanded(true)} title="Expandir detalhes" className="flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300 transition-colors">
-              <ChevronDown className="w-3.5 h-3.5" /> Detalhes
+            <button onClick={() => setSecurityExpanded(true)} title={t('overview.details')} className="flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300 transition-colors">
+              <ChevronDown className="w-3.5 h-3.5" /> {t('overview.details')}
             </button>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2">
@@ -547,7 +549,7 @@ export function OverviewPage() {
       <div>
         <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
           <Activity className="w-5 h-5 text-forge-400" />
-          Health Checks
+          {t('overview.healthChecks')}
         </h2>
         <div className="rounded-xl border border-zinc-800 overflow-hidden">
           {health?.checks.map((check, i) => (
@@ -578,7 +580,7 @@ export function OverviewPage() {
         <div>
           <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
             <Cpu className="w-5 h-5 text-forge-400" />
-            LLM Providers
+            {t('overview.llmProviders')}
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {providers.map((p) => (
@@ -590,11 +592,11 @@ export function OverviewPage() {
                   <span className={`text-xs px-2 py-0.5 rounded-full ${
                     p.configured ? 'bg-emerald-500/20 text-emerald-400' : 'bg-zinc-700 text-zinc-400'
                   }`}>
-                    {p.configured ? 'Connected' : 'Not configured'}
+                    {p.configured ? t('overview.connected') : t('overview.notConfigured')}
                   </span>
                 </div>
                 <p className="text-xs text-zinc-500">
-                  Models: {p.models.slice(0, 3).join(', ')}{p.models.length > 3 ? ` +${p.models.length - 3}` : ''}
+                  {t('overview.models')}: {p.models.slice(0, 3).join(', ')}{p.models.length > 3 ? ` +${p.models.length - 3}` : ''}
                 </p>
               </div>
             ))}

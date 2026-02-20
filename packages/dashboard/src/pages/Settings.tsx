@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Key, Database, Shield, Cpu, Save, Check, Loader2, Eye, EyeOff, Trash2, Image, AudioLines, AlertTriangle, Info } from 'lucide-react';
 import { api, type ProviderInfo } from '@/lib/api';
+import { useI18n, type Lang } from '@/lib/i18n';
 
 const PROVIDER_META: Record<string, { display: string; placeholder: string; models: string }> = {
   openai: { display: 'OpenAI (GPT)', placeholder: 'sk-...', models: 'GPT-5.2, GPT-5, GPT-4.1, o3-pro, o4-mini' },
@@ -29,6 +30,9 @@ const SERVICE_META: Record<string, { placeholder: string; desc: string }> = {
   elevenlabs: { placeholder: 'Enter ElevenLabs API key...', desc: 'High-quality TTS voices' },
   'stable-diffusion': { placeholder: 'http://127.0.0.1:7860', desc: 'AUTOMATIC1111 WebUI URL (with --api flag)' },
   'security-webhook': { placeholder: 'https://hooks.slack.com/...', desc: 'POST security alerts to this URL (Slack, Discord, custom)' },
+  'stt-tts-api': { placeholder: 'Enter API key for VPS STT/TTS...', desc: 'Whisper (STT) + Piper (TTS) on VPS - free, no OpenAI credits' },
+  'whisper-api-url': { placeholder: 'http://167.86.85.73:5051', desc: 'VPS Whisper API URL (optional, has default)' },
+  'piper-api-url': { placeholder: 'http://167.86.85.73:5051', desc: 'VPS Piper API URL (optional, has default)' },
 };
 
 export function SettingsPage() {
@@ -47,6 +51,9 @@ export function SettingsPage() {
   const [modelInput, setModelInput] = useState('');
   const [modelSaving, setModelSaving] = useState(false);
   const [modelCustom, setModelCustom] = useState<Record<string, boolean>>({});
+
+  // i18n
+  const { t, lang, setLang } = useI18n();
 
   // Service keys state (Leonardo, ElevenLabs, SD URL, Voice)
   const [services, setServices] = useState<ServiceInfo[]>([]);
@@ -219,19 +226,51 @@ export function SettingsPage() {
   return (
     <div className="p-8 space-y-8 max-w-3xl">
       <div>
-        <h1 className="text-2xl font-bold text-white">Settings</h1>
-        <p className="text-sm text-zinc-400 mt-1">Gateway and security configuration</p>
+        <h1 className="text-2xl font-bold text-white">{t('settings.title')}</h1>
+        <p className="text-sm text-zinc-400 mt-1">{t('settings.subtitle')}</p>
       </div>
+
+      {/* General */}
+      <section className="space-y-4">
+        <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+          <Cpu className="w-5 h-5 text-forge-400" />
+          {t('settings.general')}
+        </h2>
+        <div className="rounded-xl border border-zinc-800 p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-white font-medium">{t('settings.language')}</p>
+              <p className="text-xs text-zinc-500">{t('settings.languageDesc')}</p>
+            </div>
+            <select
+              title="Language"
+              value={lang}
+              onChange={(e) => setLang(e.target.value as Lang)}
+              className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:ring-2 focus:ring-forge-500/50"
+            >
+              <option value="en">English</option>
+              <option value="pt">Português (BR)</option>
+              <option value="es">Español</option>
+              <option value="fr">Français</option>
+              <option value="de">Deutsch</option>
+              <option value="it">Italiano</option>
+              <option value="ja">日本語</option>
+              <option value="ko">한국어</option>
+              <option value="zh">中文</option>
+            </select>
+          </div>
+        </div>
+      </section>
 
       {/* LLM Providers */}
       <section className="space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-white flex items-center gap-2">
             <Cpu className="w-5 h-5 text-forge-400" />
-            LLM Providers
+            {t('settings.llmProviders')}
           </h2>
           <span className="text-xs text-zinc-500">
-            {providers.filter(p => p.configured).length}/{PROVIDER_ORDER.length} connected
+            {providers.filter(p => p.configured).length}/{PROVIDER_ORDER.length} {t('settings.connected')}
           </span>
         </div>
 
@@ -256,7 +295,7 @@ export function SettingsPage() {
                       ? 'bg-emerald-500/20 text-emerald-400'
                       : 'bg-zinc-700 text-zinc-400'
                   }`}>
-                    {isConfigured ? 'Connected' : 'Not set'}
+                    {isConfigured ? 'Connected' : t('settings.notSet')}
                   </span>
                 </div>
                 <div>
@@ -320,13 +359,13 @@ export function SettingsPage() {
                   {errors[name] && (
                     <p className="text-[11px] text-red-400 mt-1.5 font-medium">{errors[name]}</p>
                   )}
-                  <p className="text-[10px] text-zinc-500 mt-1">Stored encrypted in Vault (AES-256-GCM)</p>
+                  <p className="text-[10px] text-zinc-500">{t('settings.storedEncrypted')}</p>
                 </div>
 
                 {/* Ollama API Key (optional, for remote servers with auth) */}
                 {name === 'local' && (
                   <div className="pt-3 border-t border-zinc-800/50 space-y-2">
-                    <label className="text-xs text-zinc-400 block">API Key <span className="text-zinc-600">(optional — for remote servers with auth)</span></label>
+                    <label className="text-xs text-zinc-400 block">{t('settings.ollamaApiKey')}</label>
                     <div className="flex gap-2">
                       <div className="flex-1 relative">
                         <input
@@ -355,23 +394,18 @@ export function SettingsPage() {
                   <div className="pt-3 border-t border-zinc-800/50 space-y-2">
                     <div className="flex items-center gap-2">
                       <Info className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
-                      <span className="text-[11px] font-medium text-purple-300">Claude Pro / Max / CLI Subscription</span>
+                      <span className="text-[11px] font-medium text-purple-300">{t('settings.claudeSubscription')}</span>
                     </div>
                     <p className="text-[10px] text-zinc-400 leading-relaxed">
-                      If you have a Claude <strong className="text-zinc-300">Pro</strong>, <strong className="text-zinc-300">Max</strong>, or <strong className="text-zinc-300">CLI</strong> subscription,
-                      you can use your subscription token instead of a pay-as-you-go API key.
-                      Run <code className="px-1 py-0.5 bg-zinc-800 rounded text-purple-300">claude setup-token</code> in your terminal
-                      and paste the generated token (<code className="text-zinc-500">sk-ant-oat01-...</code>) in the API Key field above.
-                      ForgeAI auto-detects the token type and uses the correct authentication.
+                      {t('settings.claudeSubscriptionDesc')}
                     </p>
                     <div className="flex items-start gap-2 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20">
                       <AlertTriangle className="w-3.5 h-3.5 text-amber-400 flex-shrink-0 mt-0.5" />
                       <p className="text-[10px] text-amber-300/90 leading-relaxed">
-                        <strong>Temporarily unavailable:</strong> Anthropic has disabled OAuth token authentication on their API.
-                        Use a standard API key from{' '}
+                        <strong>{t('settings.claudeUnavailable')}</strong> {t('settings.claudeUnavailableDesc')}{' '}
                         <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer"
                           className="underline text-amber-200 hover:text-white">console.anthropic.com</a>{' '}
-                        until they re-enable subscription-based access.
+                        {t('settings.claudeUnavailableEnd')}
                       </p>
                     </div>
                   </div>
@@ -381,7 +415,7 @@ export function SettingsPage() {
                 <div className="pt-2 border-t border-zinc-800/50">
                   <button onClick={() => editingModels === name ? setEditingModels(null) : handleOpenModelEditor(name)}
                     className="text-[11px] text-forge-400 hover:text-forge-300 transition-colors">
-                    {editingModels === name ? '▾ Hide models' : '▸ Configure models'}{modelCustom[name] ? ' (custom)' : ''}
+                    {editingModels === name ? `▾ ${t('settings.hideModels')}` : `▸ ${t('settings.configModels')}`}{modelCustom[name] ? ` ${t('settings.custom')}` : ''}
                   </button>
 
                   {editingModels === name && (
@@ -396,7 +430,7 @@ export function SettingsPage() {
                       </div>
                       <div className="flex gap-1.5">
                         <input
-                          type="text" placeholder="Add model ID (e.g. gpt-5.2)"
+                          type="text" placeholder={t('settings.addModel')}
                           value={modelInput} onChange={e => setModelInput(e.target.value)}
                           onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddModel(name); } }}
                           className="flex-1 bg-zinc-800/50 border border-zinc-700 rounded-md px-2 py-1 text-[11px] text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-forge-500/50"
@@ -406,12 +440,12 @@ export function SettingsPage() {
                       <div className="flex gap-1.5">
                         <button onClick={() => handleSaveModels(name)} disabled={modelSaving}
                           className="px-2 py-1 rounded-md bg-forge-500 hover:bg-forge-600 text-[11px] text-white font-medium disabled:opacity-50">
-                          {modelSaving ? 'Saving...' : 'Save models'}
+                          {modelSaving ? t('settings.savingModels') : t('settings.saveModels')}
                         </button>
                         {modelCustom[name] && (
                           <button onClick={() => handleResetModels(name)} disabled={modelSaving}
                             className="px-2 py-1 rounded-md border border-zinc-700 hover:border-zinc-500 text-[11px] text-zinc-400 disabled:opacity-50">
-                            Reset to defaults
+                            {t('settings.resetDefaults')}
                           </button>
                         )}
                       </div>
@@ -428,7 +462,7 @@ export function SettingsPage() {
       <section className="space-y-4">
         <h2 className="text-lg font-semibold text-white flex items-center gap-2">
           <Shield className="w-5 h-5 text-forge-400" />
-          Security
+          {t('settings.security')}
         </h2>
         <div className="rounded-xl border border-zinc-800 divide-y divide-zinc-800">
           {[
@@ -539,7 +573,7 @@ export function SettingsPage() {
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-white flex items-center gap-2">
             <Image className="w-5 h-5 text-forge-400" />
-            Image Generation
+            {t('settings.imageGeneration')}
           </h2>
           <span className="text-xs text-zinc-500">
             {[providers.find(p => p.name === 'openai')?.configured, services.find(s => s.name === 'leonardo')?.configured, services.find(s => s.name === 'stable-diffusion')?.configured].filter(Boolean).length}/3 connected
@@ -580,11 +614,11 @@ export function SettingsPage() {
                     <p className="text-[11px] text-zinc-500 mt-0.5">{meta.desc}</p>
                   </div>
                   <span className={`text-xs px-2 py-0.5 rounded-full ${isConfigured ? 'bg-emerald-500/20 text-emerald-400' : 'bg-zinc-700 text-zinc-400'}`}>
-                    {isConfigured ? 'Connected' : 'Not set'}
+                    {isConfigured ? 'Connected' : t('settings.notSet')}
                   </span>
                 </div>
                 <div>
-                  <label className="text-xs text-zinc-400 mb-1 block">API Key</label>
+                  <label className="text-xs text-zinc-400 mb-1 block">{t('settings.apiKey')}</label>
                   <div className="flex gap-2">
                     <div className="flex-1 relative">
                       <input
@@ -631,7 +665,7 @@ export function SettingsPage() {
                     <p className="text-[11px] text-zinc-500 mt-0.5">{meta.desc}</p>
                   </div>
                   <span className={`text-xs px-2 py-0.5 rounded-full ${isConfigured ? 'bg-emerald-500/20 text-emerald-400' : 'bg-zinc-700 text-zinc-400'}`}>
-                    {isConfigured ? 'Connected' : 'Not set'}
+                    {isConfigured ? 'Connected' : t('settings.notSet')}
                   </span>
                 </div>
                 <div>
@@ -670,7 +704,7 @@ export function SettingsPage() {
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-white flex items-center gap-2">
             <AudioLines className="w-5 h-5 text-forge-400" />
-            Voice Engine
+            {t('settings.voiceEngine')}
           </h2>
           <div className="flex items-center gap-3">
             <button
@@ -707,11 +741,11 @@ export function SettingsPage() {
                     <p className="text-[11px] text-zinc-500 mt-0.5">{meta.desc}</p>
                   </div>
                   <span className={`text-xs px-2 py-0.5 rounded-full ${isConfigured ? 'bg-emerald-500/20 text-emerald-400' : 'bg-zinc-700 text-zinc-400'}`}>
-                    {isConfigured ? 'Connected' : 'Not set'}
+                    {isConfigured ? 'Connected' : t('settings.notSet')}
                   </span>
                 </div>
                 <div>
-                  <label className="text-xs text-zinc-400 mb-1 block">API Key</label>
+                  <label className="text-xs text-zinc-400 mb-1 block">{t('settings.apiKey')}</label>
                   <div className="flex gap-2">
                     <div className="flex-1 relative">
                       <input
@@ -743,6 +777,107 @@ export function SettingsPage() {
             );
           })()}
 
+          {/* VPS STT/TTS (Whisper + Piper) */}
+          {(() => {
+            const svc = services.find(s => s.name === 'stt-tts-api');
+            const meta = SERVICE_META['stt-tts-api'];
+            const isConfigured = svc?.configured ?? false;
+            const isSaving = svcSaving['stt-tts-api'] ?? false;
+            const isSaved = svcSaved['stt-tts-api'] ?? false;
+            const isVisible = svcShowKey['stt-tts-api'] ?? false;
+
+            const whisperSvc = services.find(s => s.name === 'whisper-api-url');
+            const piperSvc = services.find(s => s.name === 'piper-api-url');
+            const whisperMeta = SERVICE_META['whisper-api-url'];
+            const piperMeta = SERVICE_META['piper-api-url'];
+            return (
+              <div className="p-5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="font-medium text-white">VPS STT/TTS (Whisper + Piper)</span>
+                    <p className="text-[11px] text-zinc-500 mt-0.5">{meta.desc}</p>
+                  </div>
+                  <span className={`text-xs px-2 py-0.5 rounded-full ${isConfigured ? 'bg-emerald-500/20 text-emerald-400' : 'bg-zinc-700 text-zinc-400'}`}>
+                    {isConfigured ? 'Connected' : t('settings.notSet')}
+                  </span>
+                </div>
+                <div>
+                  <label className="text-xs text-zinc-400 mb-1 block">{t('settings.apiKey')}</label>
+                  <div className="flex gap-2">
+                    <div className="flex-1 relative">
+                      <input
+                        type={isVisible ? 'text' : 'password'}
+                        placeholder={isConfigured ? '••••••••••••' : meta.placeholder}
+                        value={svcKeys['stt-tts-api'] ?? ''}
+                        onChange={e => setSvcKeys(k => ({ ...k, 'stt-tts-api': e.target.value }))}
+                        onKeyDown={e => e.key === 'Enter' && handleSvcSave('stt-tts-api')}
+                        className="w-full bg-zinc-800/50 border border-zinc-700 rounded-lg px-3 py-2 pr-9 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-forge-500/50"
+                      />
+                      <button aria-label="Toggle visibility" onClick={() => setSvcShowKey(s => ({ ...s, 'stt-tts-api': !isVisible }))} className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300">
+                        {isVisible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                    <button aria-label="Save STT/TTS key" onClick={() => handleSvcSave('stt-tts-api')} disabled={isSaving || !(svcKeys['stt-tts-api']?.trim())}
+                      className={`px-3 py-2 rounded-lg text-white text-xs font-medium transition-all ${isSaved ? 'bg-emerald-500' : isSaving ? 'bg-forge-500/50 cursor-wait' : svcKeys['stt-tts-api']?.trim() ? 'bg-forge-500 hover:bg-forge-600' : 'bg-zinc-700 cursor-not-allowed opacity-50'}`}>
+                      {isSaved ? <Check className="w-4 h-4" /> : isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                    </button>
+                    {isConfigured && (
+                      <button aria-label="Remove STT/TTS key" onClick={() => handleSvcRemove('stt-tts-api')} disabled={svcDeleting['stt-tts-api']}
+                        className="px-3 py-2 rounded-lg text-red-400 hover:text-white hover:bg-red-500/80 border border-red-500/30 text-xs font-medium transition-all">
+                        {svcDeleting['stt-tts-api'] ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                      </button>
+                    )}
+                  </div>
+                  {svcErrors['stt-tts-api'] && <p className="text-xs text-red-400 mt-1">{svcErrors['stt-tts-api']}</p>}
+                </div>
+
+                {/* Whisper API URL */}
+                <div>
+                  <label className="text-xs text-zinc-400 mb-1 block">Whisper API URL</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder={whisperSvc?.configured ? 'Configured' : whisperMeta.placeholder}
+                      value={svcKeys['whisper-api-url'] ?? ''}
+                      onChange={e => setSvcKeys(k => ({ ...k, 'whisper-api-url': e.target.value }))}
+                      onKeyDown={e => e.key === 'Enter' && handleSvcSave('whisper-api-url')}
+                      className="flex-1 bg-zinc-800/50 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-forge-500/50"
+                    />
+                    <button aria-label="Save Whisper URL" onClick={() => handleSvcSave('whisper-api-url')} disabled={svcSaving['whisper-api-url'] || !(svcKeys['whisper-api-url']?.trim())}
+                      className={`px-3 py-2 rounded-lg text-white text-xs font-medium transition-all ${svcSaved['whisper-api-url'] ? 'bg-emerald-500' : svcSaving['whisper-api-url'] ? 'bg-forge-500/50 cursor-wait' : svcKeys['whisper-api-url']?.trim() ? 'bg-forge-500 hover:bg-forge-600' : 'bg-zinc-700 cursor-not-allowed opacity-50'}`}>
+                      {svcSaved['whisper-api-url'] ? <Check className="w-4 h-4" /> : svcSaving['whisper-api-url'] ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  {svcErrors['whisper-api-url'] && <p className="text-xs text-red-400 mt-1">{svcErrors['whisper-api-url']}</p>}
+                </div>
+
+                {/* Piper API URL */}
+                <div>
+                  <label className="text-xs text-zinc-400 mb-1 block">Piper API URL</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder={piperSvc?.configured ? 'Configured' : piperMeta.placeholder}
+                      value={svcKeys['piper-api-url'] ?? ''}
+                      onChange={e => setSvcKeys(k => ({ ...k, 'piper-api-url': e.target.value }))}
+                      onKeyDown={e => e.key === 'Enter' && handleSvcSave('piper-api-url')}
+                      className="flex-1 bg-zinc-800/50 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-forge-500/50"
+                    />
+                    <button aria-label="Save Piper URL" onClick={() => handleSvcSave('piper-api-url')} disabled={svcSaving['piper-api-url'] || !(svcKeys['piper-api-url']?.trim())}
+                      className={`px-3 py-2 rounded-lg text-white text-xs font-medium transition-all ${svcSaved['piper-api-url'] ? 'bg-emerald-500' : svcSaving['piper-api-url'] ? 'bg-forge-500/50 cursor-wait' : svcKeys['piper-api-url']?.trim() ? 'bg-forge-500 hover:bg-forge-600' : 'bg-zinc-700 cursor-not-allowed opacity-50'}`}>
+                      {svcSaved['piper-api-url'] ? <Check className="w-4 h-4" /> : svcSaving['piper-api-url'] ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  {svcErrors['piper-api-url'] && <p className="text-xs text-red-400 mt-1">{svcErrors['piper-api-url']}</p>}
+                </div>
+
+                <p className="text-[10px] text-zinc-500 flex items-center gap-1">
+                  <Info className="w-3 h-3" /> Free STT/TTS on your VPS — no OpenAI credits needed
+                </p>
+              </div>
+            );
+          })()}
+
           {/* Voice config link */}
           <div className="flex items-center justify-between p-5">
             <div>
@@ -760,7 +895,7 @@ export function SettingsPage() {
       <section className="space-y-4">
         <h2 className="text-lg font-semibold text-white flex items-center gap-2">
           <Database className="w-5 h-5 text-forge-400" />
-          Database
+          {t('settings.database')}
         </h2>
         <div className="rounded-xl border border-zinc-800 p-5 space-y-2">
           <div className="flex justify-between text-sm">

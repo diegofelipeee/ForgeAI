@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Trash2, AlertTriangle, Bot, User, Loader2, Plus, MessageSquare, Terminal, CheckCircle2, XCircle, ChevronDown, ChevronRight, Clock, X, Eraser, ImagePlus, Brain, FileCode, Globe, Monitor, Database, Wrench, Smartphone, Radio, Hash } from 'lucide-react';
+import { Send, Trash2, AlertTriangle, Bot, User, Loader2, Plus, MessageSquare, Terminal, CheckCircle2, XCircle, ChevronDown, ChevronRight, Clock, X, Eraser, ImagePlus, Brain, FileCode, Globe, Monitor, Database, Wrench, Smartphone, Radio, Hash, Mic, Square, Volume2 } from 'lucide-react';
 import { api, type ChatResponse, type AgentStep, type SessionSummary, type StoredMessage, type AgentInfo, type ProviderInfo } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { useI18n } from '@/lib/i18n';
 
 interface Message {
   id: string;
@@ -380,6 +381,7 @@ interface LiveProgress {
 }
 
 export function ChatPage() {
+  const { t } = useI18n();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -403,6 +405,115 @@ export function ChatPage() {
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
   const [showModelPicker, setShowModelPicker] = useState(false);
+
+  // Voice state
+  const [voiceMode, setVoiceMode] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [sttBusy, setSttBusy] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const ttsAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+      audioChunksRef.current = [];
+      mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
+      mediaRecorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const buffer = await blob.arrayBuffer();
+        const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+        setSttBusy(true);
+        try {
+          const res = await fetch('/api/voice/transcribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ audio: base64, format: 'webm' }),
+          });
+          const data = await res.json() as { text?: string; error?: string };
+          if (data.text && data.text.trim()) {
+            setInput(data.text.trim());
+            // Auto-send in voice mode
+            setTimeout(() => {
+              const form = document.querySelector('form');
+              if (form) form.requestSubmit();
+            }, 100);
+          }
+        } catch { /* ignore */ }
+        setSttBusy(false);
+      };
+      mediaRecorder.start();
+      mediaRecorderRef.current = mediaRecorder;
+      setRecording(true);
+    } catch (err) {
+      console.error('Mic error:', err);
+    }
+  };
+
+  const stopRecording = () => {
+    mediaRecorderRef.current?.stop();
+    mediaRecorderRef.current = null;
+    setRecording(false);
+  };
+
+  const playTTS = async (text: string) => {
+    if (!voiceMode) return;
+
+    // Split into sentences for streaming playback (first sentence plays fast)
+    const sentences = text
+      .replace(/([.!?])\s+/g, '$1\n')
+      .split('\n')
+      .map(s => s.trim())
+      .filter(s => s.length > 2);
+
+    if (sentences.length === 0) return;
+
+    // Chunk sentences into groups of ~2-3 for natural pacing
+    const chunks: string[] = [];
+    let current = '';
+    for (const s of sentences) {
+      if (current.length + s.length > 200 && current.length > 0) {
+        chunks.push(current);
+        current = s;
+      } else {
+        current = current ? `${current} ${s}` : s;
+      }
+    }
+    if (current) chunks.push(current);
+
+    // Play chunks sequentially — first chunk starts ASAP
+    const audioQueue: HTMLAudioElement[] = [];
+    let playing = false;
+
+    const playNext = () => {
+      if (audioQueue.length === 0) { playing = false; return; }
+      playing = true;
+      const audio = audioQueue.shift()!;
+      audio.onended = playNext;
+      audio.play().catch(() => playNext());
+    };
+
+    for (const chunk of chunks) {
+      try {
+        const res = await fetch('/api/voice/synthesize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: chunk }),
+        });
+        if (!res.ok) continue;
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        audioQueue.push(audio);
+        ttsAudioRef.current = audio;
+
+        // Start playing as soon as first chunk is ready
+        if (!playing) playNext();
+      } catch { /* ignore */ }
+    }
+  };
 
   const refreshSessions = useCallback(() => {
     api.getSessions().then(data => setSessions(data.sessions)).catch(() => {});
@@ -462,9 +573,9 @@ export function ChatPage() {
         if (p.status === 'calling_tool' && p.currentTool) {
           setExecutionStatus(`${channelLabel}[${p.iteration}/${p.maxIterations}] ▶ ${p.currentTool}`);
         } else if (p.status === 'thinking') {
-          setExecutionStatus(`${channelLabel}[${p.iteration}/${p.maxIterations}] Pensando...`);
+          setExecutionStatus(`${channelLabel}[${p.iteration}/${p.maxIterations}] ${t('chat.thinking')}`);
         } else if (p.status === 'done') {
-          setExecutionStatus(`${channelLabel}Finalizando...`);
+          setExecutionStatus(`${channelLabel}${t('chat.finishing')}`);
         }
       } else if (data.type === 'agent.step' && data.step) {
         const eventSid = data.sessionId;
@@ -598,9 +709,9 @@ export function ChatPage() {
           if (p.status === 'calling_tool' && p.currentTool) {
             setExecutionStatus(`[${p.iteration}/${p.maxIterations}] ▶ ${p.currentTool}`);
           } else if (p.status === 'thinking') {
-            setExecutionStatus(`[${p.iteration}/${p.maxIterations}] Pensando...`);
+            setExecutionStatus(`[${p.iteration}/${p.maxIterations}] ${t('chat.thinking')}`);
           } else if (p.status === 'done') {
-            setExecutionStatus('Finalizando...');
+            setExecutionStatus(t('chat.finishing'));
           }
         }
       } catch { /* ignore */ }
@@ -674,7 +785,7 @@ export function ChatPage() {
       });
       const label = match.status === 'calling_tool' && match.currentTool
         ? `[${match.iteration}/${match.maxIterations}] ▶ ${match.currentTool}`
-        : `[${match.iteration}/${match.maxIterations}] Pensando...`;
+        : `[${match.iteration}/${match.maxIterations}] ${t('chat.thinking')}`;
       setExecutionStatus(label);
 
       // Fallback polling (5s) to detect completion if WS misses the done event
@@ -694,7 +805,7 @@ export function ChatPage() {
             });
             const lbl = still.status === 'calling_tool' && still.currentTool
               ? `[${still.iteration}/${still.maxIterations}] ▶ ${still.currentTool}`
-              : `[${still.iteration}/${still.maxIterations}] Pensando...`;
+              : `[${still.iteration}/${still.maxIterations}] ${t('chat.thinking')}`;
             setExecutionStatus(lbl);
           } else {
             // Agent finished — stop polling, reload messages
@@ -836,13 +947,13 @@ export function ChatPage() {
     setMessages((prev) => [...prev, userMsg]);
     setInput('');
     setLoading(true);
-    setExecutionStatus('Enviando...');
+    setExecutionStatus(t('chat.sending'));
 
     // Determine sessionId for polling (use existing or predict new one)
     const activeSid = sessionId;
 
     try {
-      setExecutionStatus('Pensando...');
+      setExecutionStatus(t('chat.thinking'));
 
       // Build image payload if present
       const imagePayload = pendingImage
@@ -851,7 +962,7 @@ export function ChatPage() {
       setPendingImage(null);
 
       // Start sending and polling in parallel
-      const sendPromise = api.sendMessage(contentText, activeSid ?? undefined, imagePayload, activeAgentId ?? undefined, selectedModel ?? undefined, selectedProvider ?? undefined);
+      const sendPromise = api.sendMessage(contentText, activeSid ?? undefined, imagePayload, activeAgentId ?? undefined);
 
       // Start polling after a short delay (give backend time to create session)
       setTimeout(() => {
@@ -878,6 +989,11 @@ export function ChatPage() {
 
       setMessages((prev) => [...prev, assistantMsg]);
       refreshSessions();
+
+      // Auto-play TTS in voice mode
+      if (voiceMode && res.content && !res.blocked) {
+        playTTS(res.content);
+      }
     } catch (err) {
       stopProgressPolling();
       setMessages((prev) => [
@@ -885,7 +1001,7 @@ export function ChatPage() {
         {
           id: `err-${Date.now()}`,
           role: 'assistant',
-          content: `Erro: ${err instanceof Error ? err.message : 'Falha na requisição'}`,
+          content: `${t('chat.error')}: ${err instanceof Error ? err.message : t('chat.requestFailed')}`,
         },
       ]);
     } finally {
@@ -915,7 +1031,7 @@ export function ChatPage() {
               className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors"
             >
               <Plus className="w-4 h-4" />
-              Novo Chat
+              {t('chat.newChat')}
             </button>
             {sessions.length > 0 && (
               <div>
@@ -923,10 +1039,10 @@ export function ChatPage() {
                   <button
                     onClick={() => setConfirmDeleteAll(true)}
                     className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 text-[11px] rounded-lg text-zinc-500 hover:text-red-400 hover:bg-red-500/5 transition-colors"
-                    title="Limpar todas as conversas"
+                    title={t('chat.deleteAllTitle')}
                   >
                     <Eraser className="w-3 h-3" />
-                    Limpar tudo
+                    {t('chat.deleteAll')}
                   </button>
                 ) : (
                   <div className="flex items-center gap-1">
@@ -934,13 +1050,13 @@ export function ChatPage() {
                       onClick={deleteAllSessions}
                       className="flex-1 px-2 py-1.5 text-[11px] rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors"
                     >
-                      Confirmar
+                      {t('chat.confirm')}
                     </button>
                     <button
                       onClick={() => setConfirmDeleteAll(false)}
                       className="flex-1 px-2 py-1.5 text-[11px] rounded-lg text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
                     >
-                      Cancelar
+                      {t('chat.cancel')}
                     </button>
                   </div>
                 )}
@@ -1105,7 +1221,7 @@ export function ChatPage() {
               <div className="rounded-xl bg-zinc-800/50 border border-zinc-700/50 px-4 py-3 flex-1 max-w-[80%]">
                 <div className="flex items-center gap-2 mb-2">
                   <Loader2 className="w-4 h-4 text-forge-400 animate-spin" />
-                  <span className="text-xs text-zinc-300 font-medium">{executionStatus || 'Pensando...'}</span>
+                  <span className="text-xs text-zinc-300 font-medium">{executionStatus || t('chat.thinking')}</span>
                   {liveProgress && (
                     <span className="text-[10px] text-zinc-500 ml-auto">
                       {((liveProgress.elapsed ?? (liveProgress.startedAt ? Date.now() - liveProgress.startedAt : 0)) / 1000).toFixed(0)}s
@@ -1217,74 +1333,17 @@ export function ChatPage() {
               ))}
               <a
                 href="/agents"
-                title="Gerenciar agentes"
+                title={t('chat.manageAgents')}
                 className="px-2 py-1 rounded-md text-[11px] text-zinc-600 border border-dashed border-zinc-700/50 hover:text-zinc-400 hover:border-zinc-600 transition-all"
               >
-                + Gerenciar
+                {t('chat.manageAgents')}
               </a>
-            </div>
-          )}
-          {/* Model/Provider picker */}
-          {providers.length > 0 && (
-            <div className="flex items-center gap-1.5 mb-2 px-1 relative">
-              <span className="text-[10px] text-zinc-500 mr-1">Model:</span>
-              <button
-                onClick={() => setShowModelPicker(!showModelPicker)}
-                className={cn(
-                  'px-2.5 py-1 rounded-md text-[11px] font-medium transition-all flex items-center gap-1',
-                  selectedModel
-                    ? 'bg-blue-500/20 text-blue-400 border border-blue-500/40'
-                    : 'bg-zinc-800/50 text-zinc-500 border border-zinc-700/50 hover:text-zinc-300 hover:border-zinc-600'
-                )}
-              >
-                {selectedModel ? `${selectedModel}` : 'Default (auto)'}
-                <ChevronDown className="w-3 h-3" />
-              </button>
-              {selectedModel && (
-                <button
-                  onClick={() => { setSelectedModel(null); setSelectedProvider(null); }}
-                  className="text-zinc-600 hover:text-zinc-400 transition-colors"
-                  title="Reset to default"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              )}
-              {showModelPicker && (
-                <div className="absolute bottom-full left-0 mb-1 w-80 max-h-64 overflow-y-auto bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-50">
-                  <div className="p-2 border-b border-zinc-800">
-                    <p className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider">Select Provider / Model</p>
-                  </div>
-                  {providers.map(p => (
-                    <div key={p.name} className="border-b border-zinc-800/50 last:border-0">
-                      <p className="px-3 pt-2 pb-1 text-[10px] text-zinc-500 font-semibold uppercase">{p.displayName}</p>
-                      {p.models.map(m => (
-                        <button
-                          key={`${p.name}-${m}`}
-                          onClick={() => {
-                            setSelectedProvider(p.name);
-                            setSelectedModel(m);
-                            setShowModelPicker(false);
-                          }}
-                          className={cn(
-                            'w-full text-left px-3 py-1.5 text-xs transition-colors',
-                            selectedModel === m && selectedProvider === p.name
-                              ? 'bg-blue-500/20 text-blue-400'
-                              : 'text-zinc-300 hover:bg-zinc-800'
-                          )}
-                        >
-                          {m}
-                        </button>
-                      ))}
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
           )}
           {loading && (
             <div className="flex items-center gap-2 mb-2 px-2">
               <div className="w-2 h-2 rounded-full bg-forge-400 animate-pulse" />
-              <span className="text-xs text-zinc-400">Agente trabalhando... Aguarde.</span>
+              <span className="text-xs text-zinc-400">{t('chat.agentWorking')}</span>
             </div>
           )}
           {pendingImage && (
@@ -1294,16 +1353,16 @@ export function ChatPage() {
                 <p className="text-xs text-zinc-300 truncate">{pendingImage.file.name}</p>
                 <p className="text-[10px] text-zinc-500">{(pendingImage.file.size / 1024).toFixed(0)} KB</p>
               </div>
-              <button onClick={() => setPendingImage(null)} title="Remover imagem" className="text-zinc-500 hover:text-red-400 transition-colors">
+              <button onClick={() => setPendingImage(null)} title={t('chat.removeImage')} className="text-zinc-500 hover:text-red-400 transition-colors">
                 <X className="w-4 h-4" />
               </button>
             </div>
           )}
-          <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageSelect} aria-label="Selecionar imagem" />
+          <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageSelect} aria-label={t('chat.selectImage')} />
           {sessionChannelType && sessionChannelType !== 'webchat' ? (
             <div className="flex items-center justify-center gap-2 py-3 text-xs text-zinc-500">
               <ChannelBadge channelType={sessionChannelType} />
-              <span>Conversa somente leitura — mensagens do canal {CHANNEL_CONFIG[sessionChannelType]?.label ?? sessionChannelType}</span>
+              <span>{t('chat.readOnly')} {CHANNEL_CONFIG[sessionChannelType]?.label ?? sessionChannelType}</span>
             </div>
           ) : (
           <form
@@ -1314,24 +1373,55 @@ export function ChatPage() {
               type="button"
               onClick={() => fileInputRef.current?.click()}
               disabled={loading}
-              title="Anexar imagem"
+              title={t('chat.attachImage')}
               className="w-11 h-11 rounded-xl border border-zinc-700 hover:border-forge-500/50 text-zinc-400 hover:text-forge-400 disabled:opacity-50 flex items-center justify-center transition-colors"
             >
               <ImagePlus className="w-4 h-4" />
             </button>
+            {/* Voice mode toggle */}
+            <button
+              type="button"
+              onClick={() => setVoiceMode(v => !v)}
+              title={voiceMode ? t('chat.voiceModeOn') : t('chat.voiceModeOff')}
+              className={`w-11 h-11 rounded-xl border flex items-center justify-center transition-colors ${
+                voiceMode
+                  ? 'border-forge-500 bg-forge-500/20 text-forge-400'
+                  : 'border-zinc-700 hover:border-forge-500/50 text-zinc-400 hover:text-forge-400'
+              }`}
+            >
+              <Volume2 className="w-4 h-4" />
+            </button>
+            {/* Mic button (visible when voice mode is on) */}
+            {voiceMode && (
+              <button
+                type="button"
+                onClick={recording ? stopRecording : startRecording}
+                disabled={loading || sttBusy}
+                title={recording ? t('chat.stopRecording') : t('chat.startRecording')}
+                className={`w-11 h-11 rounded-xl flex items-center justify-center transition-colors ${
+                  recording
+                    ? 'bg-red-500 text-white animate-pulse'
+                    : sttBusy
+                      ? 'bg-amber-500/20 border border-amber-500/50 text-amber-400'
+                      : 'bg-red-500/20 border border-red-500/50 text-red-400 hover:bg-red-500/30'
+                }`}
+              >
+                {sttBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : recording ? <Square className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+              </button>
+            )}
             <input
               ref={inputRef}
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder={loading ? 'Agente executando...' : 'Peça para criar algo...'}
-              disabled={loading}
+              placeholder={sttBusy ? t('chat.transcribing') : loading ? t('chat.agentExecuting') : voiceMode ? t('chat.speakOrType') : t('chat.askAnything')}
+              disabled={loading || sttBusy}
               className="flex-1 bg-zinc-800/50 border border-zinc-700 rounded-xl px-4 py-3 text-sm text-zinc-200 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-forge-500/50 focus:border-forge-500/50 disabled:opacity-50 transition-all"
             />
             <button
               type="submit"
-              disabled={loading || (!input.trim() && !pendingImage)}
-              title="Enviar mensagem"
+              disabled={loading || sttBusy || (!input.trim() && !pendingImage)}
+              title={t('chat.sendMessage')}
               className="w-11 h-11 rounded-xl bg-forge-500 hover:bg-forge-600 disabled:bg-zinc-700 disabled:text-zinc-500 text-white flex items-center justify-center transition-colors"
             >
               <Send className="w-4 h-4" />
