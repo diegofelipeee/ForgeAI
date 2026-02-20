@@ -35,6 +35,7 @@ const SERVICE_META: Record<string, { placeholder: string; desc: string }> = {
   'piper-api-url': { placeholder: 'http://167.86.85.73:5051', desc: 'VPS Piper API URL (optional, has default)' },
   'kokoro-api-url': { placeholder: 'http://167.86.85.73:8881', desc: 'Kokoro TTS URL — high-quality, 67 voices, PT-BR support' },
   'kokoro-api-key': { placeholder: 'Enter Kokoro API key...', desc: 'Bearer token for Kokoro TTS auth (nginx proxy)' },
+  'node-api-key': { placeholder: 'Enter Node Protocol API key...', desc: 'Shared secret for IoT/embedded node agents (Raspberry Pi, ESP32, etc.)' },
 };
 
 export function SettingsPage() {
