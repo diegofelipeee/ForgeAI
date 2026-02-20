@@ -19,6 +19,7 @@ import { createPairingManager, type PairingManager } from '../pairing/pairing-ma
 import { ChatHistoryStore, createChatHistoryStore, type StoredMessage } from '../chat-history-store.js';
 import { loadWorkspacePrompts, getWorkspacePromptFiles } from '@forgeai/agent';
 import { createOTelManager, type OTelManager } from '../telemetry/otel-manager.js';
+import { createArtifactManager, type ArtifactManager } from '../artifact/artifact-manager.js';
 
 const logger = createLogger('Core:ChatRoutes');
 
@@ -57,6 +58,7 @@ let autopilotEngine: AutopilotEngine | null = null;
 let pairingManager: PairingManager | null = null;
 let nodeChannel: NodeChannel | null = null;
 let wakeWordManager: WakeWordManager | null = null;
+let artifactManager: ArtifactManager | null = null;
 
 export function getAgentRuntime(): AgentRuntime | null {
   return agentRuntime;
@@ -2618,6 +2620,112 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
     const frame = new Int16Array(buffer.buffer, buffer.byteOffset, buffer.byteLength / 2);
     const detected = await wakeWordManager.processAudioFrame(frame);
     return { detected, running: true };
+  });
+
+  // ─── ForgeCanvas: Artifact System ──────────────────
+
+  artifactManager = createArtifactManager();
+
+  // Wire artifact events to WebSocket broadcaster
+  artifactManager.onEvent((event) => {
+    const broadcaster = getWSBroadcaster();
+    if (broadcaster) {
+      broadcaster.broadcastAll({ type: 'artifact', event });
+    }
+  });
+
+  logger.info('ForgeCanvas artifact manager initialized', { artifacts: artifactManager.count() });
+
+  // GET /api/artifacts — list all artifacts (optionally filter by sessionId)
+  app.get('/api/artifacts', async (request: FastifyRequest) => {
+    if (!artifactManager) return { artifacts: [] };
+    const query = request.query as { sessionId?: string };
+    const artifacts = query.sessionId
+      ? artifactManager.listBySession(query.sessionId)
+      : artifactManager.listAll();
+    return { artifacts, count: artifacts.length };
+  });
+
+  // GET /api/artifacts/:id — get a single artifact
+  app.get('/api/artifacts/:id', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!artifactManager) { reply.status(503).send({ error: 'Artifact manager not ready' }); return; }
+    const { id } = request.params as { id: string };
+    const artifact = artifactManager.get(id);
+    if (!artifact) { reply.status(404).send({ error: 'Artifact not found' }); return; }
+    return { artifact };
+  });
+
+  // GET /api/artifacts/:id/render — get rendered HTML for iframe
+  app.get('/api/artifacts/:id/render', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!artifactManager) { reply.status(503).send({ error: 'Artifact manager not ready' }); return; }
+    const { id } = request.params as { id: string };
+    const artifact = artifactManager.get(id);
+    if (!artifact) { reply.status(404).send({ error: 'Artifact not found' }); return; }
+    const html = artifactManager.renderToHTML(artifact);
+    reply.type('text/html').send(html);
+  });
+
+  // POST /api/artifacts — create a new artifact
+  app.post('/api/artifacts', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!artifactManager) { reply.status(503).send({ error: 'Artifact manager not ready' }); return; }
+    const body = request.body as {
+      sessionId?: string;
+      messageId?: string;
+      type?: string;
+      title?: string;
+      content?: string;
+      language?: string;
+      chartConfig?: any;
+    };
+    if (!body.sessionId || !body.type || !body.title || !body.content) {
+      reply.status(400).send({ error: 'sessionId, type, title, and content are required' }); return;
+    }
+    const validTypes = ['html', 'react', 'svg', 'mermaid', 'chart', 'markdown', 'code'];
+    if (!validTypes.includes(body.type)) {
+      reply.status(400).send({ error: `Invalid type. Valid: ${validTypes.join(', ')}` }); return;
+    }
+    const artifact = artifactManager.create({
+      sessionId: body.sessionId,
+      messageId: body.messageId,
+      type: body.type as any,
+      title: body.title,
+      content: body.content,
+      language: body.language,
+      chartConfig: body.chartConfig,
+    });
+    logger.info('Artifact created', { id: artifact.id, type: artifact.type, title: artifact.title });
+    return { artifact };
+  });
+
+  // PUT /api/artifacts/:id — update an artifact
+  app.put('/api/artifacts/:id', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!artifactManager) { reply.status(503).send({ error: 'Artifact manager not ready' }); return; }
+    const { id } = request.params as { id: string };
+    const body = request.body as { title?: string; content?: string; language?: string; chartConfig?: any };
+    const updated = artifactManager.update(id, body);
+    if (!updated) { reply.status(404).send({ error: 'Artifact not found' }); return; }
+    logger.info('Artifact updated', { id, version: updated.version });
+    return { artifact: updated };
+  });
+
+  // DELETE /api/artifacts/:id — delete an artifact
+  app.delete('/api/artifacts/:id', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!artifactManager) { reply.status(503).send({ error: 'Artifact manager not ready' }); return; }
+    const { id } = request.params as { id: string };
+    const deleted = artifactManager.delete(id);
+    if (!deleted) { reply.status(404).send({ error: 'Artifact not found' }); return; }
+    logger.info('Artifact deleted', { id });
+    return { deleted: true };
+  });
+
+  // POST /api/artifacts/:id/interact — handle interaction from iframe postMessage
+  app.post('/api/artifacts/:id/interact', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!artifactManager) { reply.status(503).send({ error: 'Artifact manager not ready' }); return; }
+    const { id } = request.params as { id: string };
+    const body = request.body as { action?: string; data?: Record<string, unknown> };
+    if (!body.action) { reply.status(400).send({ error: 'action is required' }); return; }
+    artifactManager.handleInteraction(id, body.action, body.data);
+    return { received: true };
   });
 
   // ─── Language Setting ──────────────────────────────
