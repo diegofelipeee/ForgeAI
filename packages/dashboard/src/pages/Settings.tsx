@@ -33,6 +33,7 @@ const SERVICE_META: Record<string, { placeholder: string; desc: string }> = {
   'stt-tts-api': { placeholder: 'Enter API key for VPS STT/TTS...', desc: 'Whisper (STT) + Piper (TTS) on VPS - free, no OpenAI credits' },
   'whisper-api-url': { placeholder: 'http://167.86.85.73:5051', desc: 'VPS Whisper API URL (optional, has default)' },
   'piper-api-url': { placeholder: 'http://167.86.85.73:5051', desc: 'VPS Piper API URL (optional, has default)' },
+  'kokoro-api-url': { placeholder: 'http://167.86.85.73:8880', desc: 'Kokoro TTS URL — high-quality, 67 voices, PT-BR support' },
 };
 
 export function SettingsPage() {
@@ -788,8 +789,10 @@ export function SettingsPage() {
 
             const whisperSvc = services.find(s => s.name === 'whisper-api-url');
             const piperSvc = services.find(s => s.name === 'piper-api-url');
+            const kokoroSvc = services.find(s => s.name === 'kokoro-api-url');
             const whisperMeta = SERVICE_META['whisper-api-url'];
             const piperMeta = SERVICE_META['piper-api-url'];
+            const kokoroMeta = SERVICE_META['kokoro-api-url'];
             return (
               <div className="p-5 space-y-3">
                 <div className="flex items-center justify-between">
@@ -869,6 +872,26 @@ export function SettingsPage() {
                     </button>
                   </div>
                   {svcErrors['piper-api-url'] && <p className="text-xs text-red-400 mt-1">{svcErrors['piper-api-url']}</p>}
+                </div>
+
+                {/* Kokoro API URL */}
+                <div>
+                  <label className="text-xs text-zinc-400 mb-1 block">Kokoro TTS URL</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder={kokoroSvc?.configured ? 'Configured' : kokoroMeta.placeholder}
+                      value={svcKeys['kokoro-api-url'] ?? ''}
+                      onChange={e => setSvcKeys(k => ({ ...k, 'kokoro-api-url': e.target.value }))}
+                      onKeyDown={e => e.key === 'Enter' && handleSvcSave('kokoro-api-url')}
+                      className="flex-1 bg-zinc-800/50 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-forge-500/50"
+                    />
+                    <button aria-label="Save Kokoro URL" onClick={() => handleSvcSave('kokoro-api-url')} disabled={svcSaving['kokoro-api-url'] || !(svcKeys['kokoro-api-url']?.trim())}
+                      className={`px-3 py-2 rounded-lg text-white text-xs font-medium transition-all ${svcSaved['kokoro-api-url'] ? 'bg-emerald-500' : svcSaving['kokoro-api-url'] ? 'bg-forge-500/50 cursor-wait' : svcKeys['kokoro-api-url']?.trim() ? 'bg-forge-500 hover:bg-forge-600' : 'bg-zinc-700 cursor-not-allowed opacity-50'}`}>
+                      {svcSaved['kokoro-api-url'] ? <Check className="w-4 h-4" /> : svcSaving['kokoro-api-url'] ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  {svcErrors['kokoro-api-url'] && <p className="text-xs text-red-400 mt-1">{svcErrors['kokoro-api-url']}</p>}
                 </div>
 
                 <p className="text-[10px] text-zinc-500 flex items-center gap-1">

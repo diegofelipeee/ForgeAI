@@ -172,6 +172,85 @@ class PiperTTSAdapter implements TTSAdapter {
   }
 }
 
+/** Kokoro TTS via VPS API — high-quality, OpenAI-compatible, CPU-only */
+class KokoroTTSAdapter implements TTSAdapter {
+  readonly provider: TTSProvider = 'kokoro';
+
+  private getConfig() {
+    return {
+      baseUrl: (process.env.KOKORO_API_URL || 'http://167.86.85.73:8880').replace(/\/+$/, ''),
+    };
+  }
+
+  isConfigured(): boolean {
+    return !!this.getConfig().baseUrl;
+  }
+
+  async synthesize(request: TTSRequest): Promise<TTSResponse> {
+    const start = Date.now();
+    const { baseUrl } = this.getConfig();
+
+    const res = await fetch(`${baseUrl}/v1/audio/speech`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'kokoro',
+        input: request.text,
+        voice: request.voice ?? 'pf_dora',
+        speed: request.speed ?? 1.0,
+        response_format: request.format ?? 'mp3',
+      }),
+    });
+
+    if (!res.ok) throw new Error(`Kokoro TTS error: ${res.status} ${await res.text()}`);
+
+    const audio = Buffer.from(await res.arrayBuffer());
+    return {
+      audio,
+      format: request.format ?? 'mp3',
+      durationMs: Date.now() - start,
+      provider: 'kokoro',
+      charCount: request.text.length,
+    };
+  }
+
+  async listVoices(): Promise<{ id: string; name: string; language: string }[]> {
+    const { baseUrl } = this.getConfig();
+    try {
+      const res = await fetch(`${baseUrl}/v1/audio/voices`);
+      if (!res.ok) return this.defaultVoices();
+      const data = await res.json() as { voices: string[] };
+      return data.voices.map(v => {
+        const lang = v.startsWith('p') ? 'pt-BR'
+          : v.startsWith('e') ? 'es'
+          : v.startsWith('f') ? 'fr'
+          : v.startsWith('j') ? 'ja'
+          : v.startsWith('z') ? 'zh'
+          : v.startsWith('h') ? 'hi'
+          : v.startsWith('i') ? 'it'
+          : v.startsWith('b') ? 'en-GB'
+          : 'en-US';
+        const gender = v.includes('f_') ? 'F' : 'M';
+        return { id: v, name: `${v} (${gender})`, language: lang };
+      });
+    } catch {
+      return this.defaultVoices();
+    }
+  }
+
+  private defaultVoices() {
+    return [
+      { id: 'pf_dora', name: 'Dora (F)', language: 'pt-BR' },
+      { id: 'pm_alex', name: 'Alex (M)', language: 'pt-BR' },
+      { id: 'pm_santa', name: 'Santa (M)', language: 'pt-BR' },
+      { id: 'af_bella', name: 'Bella (F)', language: 'en-US' },
+      { id: 'af_heart', name: 'Heart (F)', language: 'en-US' },
+      { id: 'am_adam', name: 'Adam (M)', language: 'en-US' },
+      { id: 'ef_dora', name: 'Dora ES (F)', language: 'es' },
+    ];
+  }
+}
+
 /** Whisper STT via VPS API — free, faster-whisper on VPS */
 class VPSWhisperSTTAdapter implements STTAdapter {
   readonly provider: STTProvider = 'whisper-vps';
@@ -370,6 +449,7 @@ export class VoiceEngine {
     this.ttsAdapters.set('openai', new OpenAITTSAdapter());
     this.ttsAdapters.set('elevenlabs', new ElevenLabsTTSAdapter());
     this.ttsAdapters.set('piper', new PiperTTSAdapter());
+    this.ttsAdapters.set('kokoro', new KokoroTTSAdapter());
     this.sttAdapters.set('whisper', new OpenAISTTAdapter());
     this.sttAdapters.set('openai', new OpenAISTTAdapter());
     this.sttAdapters.set('whisper-local', new LocalWhisperSTTAdapter());

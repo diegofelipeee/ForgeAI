@@ -198,7 +198,7 @@ export function VoicePage() {
               >
                 {providers.tts.map(p => (
                   <option key={p.provider} value={p.provider}>
-                    {p.provider === 'openai' ? 'OpenAI TTS' : p.provider === 'elevenlabs' ? 'ElevenLabs' : p.provider}
+                    {p.provider === 'openai' ? 'OpenAI TTS' : p.provider === 'elevenlabs' ? 'ElevenLabs' : p.provider === 'kokoro' ? 'Kokoro (Local)' : p.provider === 'piper' ? 'Piper (VPS)' : p.provider}
                     {p.configured ? ' ✓' : ' (not configured)'}
                   </option>
                 ))}
