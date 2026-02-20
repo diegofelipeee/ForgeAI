@@ -152,6 +152,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
       'WHISPER_API_URL',
       'PIPER_API_URL',
       'KOKORO_API_URL',
+      'KOKORO_API_KEY',
     ];
     for (const envKey of channelEnvKeys) {
       const vaultKey = `env:${envKey}`;
@@ -1648,6 +1649,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
     { name: 'whisper-api-url', display: 'VPS Whisper URL', envKey: 'WHISPER_API_URL', type: 'url' as const },
     { name: 'piper-api-url', display: 'VPS Piper URL', envKey: 'PIPER_API_URL', type: 'url' as const },
     { name: 'kokoro-api-url', display: 'Kokoro TTS URL', envKey: 'KOKORO_API_URL', type: 'url' as const },
+    { name: 'kokoro-api-key', display: 'Kokoro API Key', envKey: 'KOKORO_API_KEY', type: 'key' as const },
   ];
 
   // GET /api/services — list service configs status

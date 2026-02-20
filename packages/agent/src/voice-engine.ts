@@ -178,21 +178,27 @@ class KokoroTTSAdapter implements TTSAdapter {
 
   private getConfig() {
     return {
-      baseUrl: (process.env.KOKORO_API_URL || 'http://167.86.85.73:8880').replace(/\/+$/, ''),
+      baseUrl: (process.env.KOKORO_API_URL || 'http://167.86.85.73:8881').replace(/\/+$/, ''),
+      apiKey: process.env.KOKORO_API_KEY || process.env.STT_TTS_API_KEY || '',
     };
   }
 
   isConfigured(): boolean {
-    return !!this.getConfig().baseUrl;
+    const { baseUrl, apiKey } = this.getConfig();
+    return !!baseUrl && !!apiKey;
   }
 
   async synthesize(request: TTSRequest): Promise<TTSResponse> {
     const start = Date.now();
-    const { baseUrl } = this.getConfig();
+    const { baseUrl, apiKey } = this.getConfig();
+    if (!apiKey) throw new Error('KOKORO_API_KEY or STT_TTS_API_KEY not configured');
 
     const res = await fetch(`${baseUrl}/v1/audio/speech`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
       body: JSON.stringify({
         model: 'kokoro',
         input: request.text,
@@ -217,7 +223,10 @@ class KokoroTTSAdapter implements TTSAdapter {
   async listVoices(): Promise<{ id: string; name: string; language: string }[]> {
     const { baseUrl } = this.getConfig();
     try {
-      const res = await fetch(`${baseUrl}/v1/audio/voices`);
+      const { apiKey } = this.getConfig();
+      const headers: Record<string, string> = {};
+      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+      const res = await fetch(`${baseUrl}/v1/audio/voices`, { headers });
       if (!res.ok) return this.defaultVoices();
       const data = await res.json() as { voices: string[] };
       return data.voices.map(v => {

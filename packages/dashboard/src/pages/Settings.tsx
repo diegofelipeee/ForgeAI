@@ -33,7 +33,8 @@ const SERVICE_META: Record<string, { placeholder: string; desc: string }> = {
   'stt-tts-api': { placeholder: 'Enter API key for VPS STT/TTS...', desc: 'Whisper (STT) + Piper (TTS) on VPS - free, no OpenAI credits' },
   'whisper-api-url': { placeholder: 'http://167.86.85.73:5051', desc: 'VPS Whisper API URL (optional, has default)' },
   'piper-api-url': { placeholder: 'http://167.86.85.73:5051', desc: 'VPS Piper API URL (optional, has default)' },
-  'kokoro-api-url': { placeholder: 'http://167.86.85.73:8880', desc: 'Kokoro TTS URL — high-quality, 67 voices, PT-BR support' },
+  'kokoro-api-url': { placeholder: 'http://167.86.85.73:8881', desc: 'Kokoro TTS URL — high-quality, 67 voices, PT-BR support' },
+  'kokoro-api-key': { placeholder: 'Enter Kokoro API key...', desc: 'Bearer token for Kokoro TTS auth (nginx proxy)' },
 };
 
 export function SettingsPage() {
@@ -892,6 +893,30 @@ export function SettingsPage() {
                     </button>
                   </div>
                   {svcErrors['kokoro-api-url'] && <p className="text-xs text-red-400 mt-1">{svcErrors['kokoro-api-url']}</p>}
+                </div>
+
+                {/* Kokoro API Key */}
+                <div>
+                  <label className="text-xs text-zinc-400 mb-1 block">Kokoro API Key</label>
+                  <div className="flex gap-2">
+                    <input
+                      type={svcShowKey['kokoro-api-key'] ? 'text' : 'password'}
+                      placeholder={services.find(s => s.name === 'kokoro-api-key')?.configured ? '••••••••' : SERVICE_META['kokoro-api-key'].placeholder}
+                      value={svcKeys['kokoro-api-key'] ?? ''}
+                      onChange={e => setSvcKeys(k => ({ ...k, 'kokoro-api-key': e.target.value }))}
+                      onKeyDown={e => e.key === 'Enter' && handleSvcSave('kokoro-api-key')}
+                      className="flex-1 bg-zinc-800/50 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-forge-500/50"
+                    />
+                    <button aria-label="Toggle Kokoro key visibility" onClick={() => setSvcShowKey(k => ({ ...k, 'kokoro-api-key': !k['kokoro-api-key'] }))}
+                      className="px-2 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors">
+                      {svcShowKey['kokoro-api-key'] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                    <button aria-label="Save Kokoro key" onClick={() => handleSvcSave('kokoro-api-key')} disabled={svcSaving['kokoro-api-key'] || !(svcKeys['kokoro-api-key']?.trim())}
+                      className={`px-3 py-2 rounded-lg text-white text-xs font-medium transition-all ${svcSaved['kokoro-api-key'] ? 'bg-emerald-500' : svcSaving['kokoro-api-key'] ? 'bg-forge-500/50 cursor-wait' : svcKeys['kokoro-api-key']?.trim() ? 'bg-forge-500 hover:bg-forge-600' : 'bg-zinc-700 cursor-not-allowed opacity-50'}`}>
+                      {svcSaved['kokoro-api-key'] ? <Check className="w-4 h-4" /> : svcSaving['kokoro-api-key'] ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  {svcErrors['kokoro-api-key'] && <p className="text-xs text-red-400 mt-1">{svcErrors['kokoro-api-key']}</p>}
                 </div>
 
                 <p className="text-[10px] text-zinc-500 flex items-center gap-1">
