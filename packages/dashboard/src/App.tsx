@@ -1,5 +1,6 @@
 import { Routes, Route } from 'react-router-dom';
 import { Layout } from './components/Layout';
+import { I18nProvider } from './components/I18nProvider';
 import { OverviewPage } from './pages/Overview';
 import { ChatPage } from './pages/Chat';
 import { ToolsPage } from './pages/Tools';
@@ -20,6 +21,7 @@ import { RAGPage } from './pages/RAG';
 
 export function App() {
   return (
+    <I18nProvider>
     <Routes>
       <Route element={<Layout />}>
         <Route path="/" element={<OverviewPage />} />
@@ -41,5 +43,6 @@ export function App() {
         <Route path="/rag" element={<RAGPage />} />
       </Route>
     </Routes>
+    </I18nProvider>
   );
 }

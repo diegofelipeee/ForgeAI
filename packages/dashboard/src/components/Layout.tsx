@@ -1,28 +1,30 @@
 import { Outlet, NavLink } from 'react-router-dom';
 import { LayoutDashboard, MessageSquare, Wrench, BarChart3, Shield, Settings, Flame, Store, Radio, Users, Brain, Mail, Database, Key, Webhook, CalendarDays, AudioLines } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useI18n } from '@/lib/i18n';
 
 const navItems = [
-  { to: '/', label: 'Overview', icon: LayoutDashboard },
-  { to: '/chat', label: 'Chat', icon: MessageSquare },
-  { to: '/tools', label: 'Tools', icon: Wrench },
-  { to: '/usage', label: 'Usage', icon: BarChart3 },
-  { to: '/plugins', label: 'Plugins', icon: Store },
-  { to: '/channels', label: 'Channels', icon: Radio },
-  { to: '/agents', label: 'Agents', icon: Users },
-  { to: '/workspace', label: 'Workspace', icon: Brain },
-  { to: '/gmail', label: 'Gmail', icon: Mail },
-  { to: '/memory', label: 'Memory', icon: Database },
-  { to: '/rag', label: 'RAG', icon: Database },
-  { to: '/api-keys', label: 'API Keys', icon: Key },
-  { to: '/webhooks', label: 'Webhooks', icon: Webhook },
-  { to: '/calendar', label: 'Calendar', icon: CalendarDays },
-  { to: '/voice', label: 'Voice', icon: AudioLines },
-  { to: '/audit', label: 'Audit Log', icon: Shield },
-  { to: '/settings', label: 'Settings', icon: Settings },
+  { to: '/', i18nKey: 'nav.overview', icon: LayoutDashboard },
+  { to: '/chat', i18nKey: 'nav.chat', icon: MessageSquare },
+  { to: '/tools', i18nKey: 'nav.tools', icon: Wrench },
+  { to: '/usage', i18nKey: 'nav.usage', icon: BarChart3 },
+  { to: '/plugins', i18nKey: 'nav.plugins', icon: Store },
+  { to: '/channels', i18nKey: 'nav.channels', icon: Radio },
+  { to: '/agents', i18nKey: 'nav.agents', icon: Users },
+  { to: '/workspace', i18nKey: 'nav.workspace', icon: Brain },
+  { to: '/gmail', i18nKey: 'nav.gmail', icon: Mail },
+  { to: '/memory', i18nKey: 'nav.memory', icon: Database },
+  { to: '/rag', i18nKey: 'nav.rag', icon: Database },
+  { to: '/api-keys', i18nKey: 'nav.apiKeys', icon: Key },
+  { to: '/webhooks', i18nKey: 'nav.webhooks', icon: Webhook },
+  { to: '/calendar', i18nKey: 'nav.calendar', icon: CalendarDays },
+  { to: '/voice', i18nKey: 'nav.voice', icon: AudioLines },
+  { to: '/audit', i18nKey: 'nav.audit', icon: Shield },
+  { to: '/settings', i18nKey: 'nav.settings', icon: Settings },
 ];
 
 export function Layout() {
+  const { t } = useI18n();
   return (
     <div className="flex h-screen overflow-hidden">
       {/* Sidebar */}
@@ -55,7 +57,7 @@ export function Layout() {
               }
             >
               <item.icon className="w-4 h-4" />
-              {item.label}
+              {t(item.i18nKey)}
             </NavLink>
           ))}
         </nav>
@@ -64,7 +66,7 @@ export function Layout() {
         <div className="px-4 py-3 border-t border-zinc-800">
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse-slow" />
-            <span className="text-xs text-zinc-500">Gateway connected</span>
+            <span className="text-xs text-zinc-500">{t('nav.gatewayConnected')}</span>
           </div>
         </div>
       </aside>

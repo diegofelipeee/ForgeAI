@@ -90,7 +90,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
 
   // Load saved API keys from Vault and register providers
   if (vault?.isInitialized()) {
-    const { AnthropicProvider, OpenAIProvider, GoogleProvider, MoonshotProvider, MistralProvider, GroqProvider, DeepSeekProvider, XAIProvider } = await import('@forgeai/agent');
+    const { AnthropicProvider, OpenAIProvider, GoogleProvider, MoonshotProvider, MistralProvider, GroqProvider, DeepSeekProvider, XAIProvider, OllamaProvider } = await import('@forgeai/agent');
 
     const VAULT_PROVIDER_MAP: Array<{ envKey: string; name: string; factory: (key: string) => any }> = [
       { envKey: 'ANTHROPIC_API_KEY', name: 'anthropic', factory: (k) => new AnthropicProvider(k) },
@@ -120,6 +120,21 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
       }
     }
 
+    // Restore Ollama provider from Vault (base URL + optional API key)
+    if (vaultKeys.includes('env:OLLAMA_BASE_URL')) {
+      try {
+        const ollamaUrl = vault.get('env:OLLAMA_BASE_URL');
+        const ollamaApiKey = vaultKeys.includes('env:OLLAMA_API_KEY') ? vault.get('env:OLLAMA_API_KEY') : undefined;
+        if (ollamaUrl) {
+          const ollamaProvider = new OllamaProvider(ollamaUrl, ollamaApiKey || undefined);
+          router.registerProvider(ollamaProvider);
+          logger.info('Loaded local (Ollama) from Vault', { url: ollamaUrl, auth: ollamaApiKey ? 'Bearer token' : 'none' });
+        }
+      } catch {
+        logger.warn('Failed to restore Ollama provider from Vault');
+      }
+    }
+
     // Load channel tokens from Vault into process.env (only connection tokens, not permissions)
     const channelEnvKeys = [
       'TELEGRAM_BOT_TOKEN',
@@ -133,6 +148,9 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
       'OLLAMA_BASE_URL',
       'SECURITY_WEBHOOK_URL',
       'RBAC_ENFORCE',
+      'STT_TTS_API_KEY',
+      'WHISPER_API_URL',
+      'PIPER_API_URL',
     ];
     for (const envKey of channelEnvKeys) {
       const vaultKey = `env:${envKey}`;
@@ -590,10 +608,10 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
 
         const chatId = inbound.groupId ?? inbound.senderId;
 
-        // Voice message → STT transcription
+        // Voice message → STT transcription (always attempt if audio + OpenAI key available)
         let messageContent = inbound.content;
         let isVoiceMessage = false;
-        if (inbound.audio && voiceEngine?.isEnabled()) {
+        if (inbound.audio && voiceEngine) {
           try {
             const sttResult = await voiceEngine.listen(inbound.audio.buffer, { format: 'ogg' });
             messageContent = sttResult.text;
@@ -601,8 +619,24 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
             logger.info('Voice transcribed (Telegram)', { text: messageContent.substring(0, 100), confidence: sttResult.confidence });
           } catch (err) {
             logger.error('STT transcription failed (Telegram)', err);
-            messageContent = '[Voice message — transcription failed]';
+            await telegramChannel!.send({
+              channelType: 'telegram',
+              recipientId: inbound.senderId,
+              groupId: inbound.groupId,
+              content: '🎤 Não consegui transcrever o áudio. Verifique se a OPENAI_API_KEY está configurada no Dashboard → Settings.',
+              replyToId: inbound.channelMessageId,
+            });
+            return;
           }
+        } else if (inbound.audio && !voiceEngine) {
+          await telegramChannel!.send({
+            channelType: 'telegram',
+            recipientId: inbound.senderId,
+            groupId: inbound.groupId,
+            content: '🎤 Mensagens de voz não estão disponíveis. Configure a OPENAI_API_KEY para habilitar transcrição via Whisper.',
+            replyToId: inbound.channelMessageId,
+          });
+          return;
         }
 
         // Persist inbound user message to chat history
@@ -755,6 +789,18 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
           content: tgContent,
           replyToId: inbound.channelMessageId,
         });
+
+        // Send TTS audio response if original was voice message
+        if (isVoiceMessage && voiceEngine?.isEnabled() && responseContent) {
+          try {
+            const ttsResult = await voiceEngine.speak(responseContent.substring(0, 4000));
+            const audioBuffer = Buffer.isBuffer(ttsResult.audio) ? ttsResult.audio : Buffer.from(ttsResult.audio);
+            await telegramChannel!.sendVoice(chatId, audioBuffer, undefined, inbound.channelMessageId);
+            logger.info('TTS voice response sent (Telegram)', { chars: responseContent.length, format: ttsResult.format });
+          } catch (ttsErr) {
+            logger.error('TTS response failed (Telegram)', ttsErr);
+          }
+        }
       });
 
       await telegramChannel.connect();
@@ -826,16 +872,16 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
 
         const waJid = inbound.groupId ?? inbound.senderId;
 
-        // Voice message → STT transcription
+        // Voice message → STT transcription (always attempt if audio + OpenAI key available)
         let waMessageContent = inbound.content;
-        if (inbound.audio && voiceEngine?.isEnabled()) {
+        if (inbound.audio && voiceEngine) {
           try {
             const sttResult = await voiceEngine.listen(inbound.audio.buffer, { format: 'ogg' });
             waMessageContent = sttResult.text;
             logger.info('Voice transcribed (WhatsApp)', { text: waMessageContent.substring(0, 100), confidence: sttResult.confidence });
           } catch (err) {
             logger.error('STT transcription failed (WhatsApp)', err);
-            waMessageContent = '[Voice message — transcription failed]';
+            waMessageContent = '🎤 [Áudio recebido mas transcrição falhou — verifique OPENAI_API_KEY]';
           }
         }
 
@@ -932,6 +978,8 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
       sessionId?: string;
       userId?: string;
       agentId?: string;
+      model?: string;
+      provider?: string;
       image?: { data: string; mimeType: string; filename?: string };
     };
 
@@ -1005,6 +1053,8 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
         channelType: 'webchat',
         agentId: body.agentId,
         image: body.image ? { base64: body.image.data, mimeType: body.image.mimeType } : undefined,
+        modelOverride: body.model,
+        providerOverride: body.provider,
       });
 
       // Clean up progress listener
@@ -1376,15 +1426,28 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
 
   app.get('/api/providers', async () => {
     const registeredProviders = router.getProviders();
-    const providerList = ALL_PROVIDERS_META.map(meta => {
+    const providerList = await Promise.all(ALL_PROVIDERS_META.map(async meta => {
       const registered = registeredProviders.get(meta.name as any);
+      let models = meta.models;
+      if (registered) {
+        // For providers with async fetchModels (e.g. Ollama), fetch real installed models
+        if (typeof (registered as any).fetchModels === 'function') {
+          try {
+            models = await (registered as any).fetchModels();
+          } catch {
+            models = registered.listModels();
+          }
+        } else {
+          models = registered.listModels();
+        }
+      }
       return {
         name: meta.name,
         displayName: registered?.displayName ?? meta.displayName,
         configured: registered?.isConfigured() ?? false,
-        models: registered?.listModels() ?? meta.models,
+        models,
       };
-    });
+    }));
 
     return { providers: providerList, routes: router.getRoutes() };
   });
@@ -1392,7 +1455,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
   // POST /api/providers/:name/key — save API key and register provider
   app.post('/api/providers/:name/key', async (request: FastifyRequest) => {
     const { name } = request.params as { name: string };
-    const { apiKey } = request.body as { apiKey: string };
+    const { apiKey, ollamaApiKey } = request.body as { apiKey: string; ollamaApiKey?: string };
 
     if (!apiKey || apiKey.trim().length === 0) {
       return { error: 'API key is required' };
@@ -1417,7 +1480,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
         groq: () => new GroqProvider(trimmedKey),
         deepseek: () => new DeepSeekProvider(trimmedKey),
         xai: () => new XAIProvider(trimmedKey),
-        local: () => new OllamaProvider(trimmedKey), // trimmedKey = base URL for local
+        local: () => new OllamaProvider(trimmedKey, ollamaApiKey?.trim() || undefined), // trimmedKey = base URL, ollamaApiKey = optional auth
       };
 
       const factory = providerMap[name];
@@ -1459,6 +1522,11 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
       // Key is valid — persist to Vault and register
       if (vault?.isInitialized()) {
         vault.set(`env:${meta.envKey}`, trimmedKey);
+        // Save Ollama API key separately if provided
+        if (name === 'local' && ollamaApiKey?.trim()) {
+          vault.set('env:OLLAMA_API_KEY', ollamaApiKey.trim());
+          logger.info('Ollama API key saved to Vault');
+        }
         logger.info(`API key for ${name} saved to Vault`, { name });
       }
 
@@ -1575,6 +1643,9 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
     { name: 'voice-enabled', display: 'Voice Engine', envKey: 'VOICE_ENABLED', type: 'toggle' as const },
     { name: 'security-webhook', display: 'Security Webhook', envKey: 'SECURITY_WEBHOOK_URL', type: 'url' as const },
     { name: 'rbac-enforce', display: 'RBAC Hard Enforcement', envKey: 'RBAC_ENFORCE', type: 'toggle' as const },
+    { name: 'stt-tts-api', display: 'VPS STT/TTS (Whisper+Piper)', envKey: 'STT_TTS_API_KEY', type: 'key' as const },
+    { name: 'whisper-api-url', display: 'VPS Whisper URL', envKey: 'WHISPER_API_URL', type: 'url' as const },
+    { name: 'piper-api-url', display: 'VPS Piper URL', envKey: 'PIPER_API_URL', type: 'url' as const },
   ];
 
   // GET /api/services — list service configs status
@@ -2154,6 +2225,18 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
     enabled: process.env.VOICE_ENABLED === 'true',
   });
 
+  // Restore voice config from Vault
+  if (vault?.isInitialized()) {
+    try {
+      const savedVoiceConfig = vault.get('config:voice');
+      if (savedVoiceConfig) {
+        const parsed = JSON.parse(savedVoiceConfig);
+        voiceEngine.setConfig(parsed);
+        logger.info('Voice config restored from Vault', parsed);
+      }
+    } catch { /* ignore parse errors */ }
+  }
+
   app.get('/api/voice/config', async () => {
     if (!voiceEngine) return { error: 'Voice not initialized' };
     return { config: voiceEngine.getConfig(), providers: voiceEngine.getAvailableProviders() };
@@ -2175,8 +2258,32 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
       language?: string;
     };
     voiceEngine.setConfig(body as any);
+
+    // Persist voice config to Vault
+    if (vault?.isInitialized()) {
+      const fullConfig = voiceEngine.getConfig();
+      vault.set('config:voice', JSON.stringify(fullConfig));
+    }
+
     logger.info('Voice config updated', body);
     return { config: voiceEngine.getConfig() };
+  });
+
+  // ─── Language Setting ──────────────────────────────
+
+  app.get('/api/settings/language', async () => {
+    const lang = vault?.isInitialized() ? (vault.get('config:language') ?? 'en') : 'en';
+    return { language: lang };
+  });
+
+  app.put('/api/settings/language', async (request: FastifyRequest) => {
+    const body = request.body as { language?: string };
+    const lang = body.language ?? 'en';
+    if (vault?.isInitialized()) {
+      vault.set('config:language', lang);
+    }
+    logger.info('Language updated', { language: lang });
+    return { language: lang };
   });
 
   // ─── Webhook Manager ───────────────────────────────

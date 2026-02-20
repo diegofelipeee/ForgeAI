@@ -123,6 +123,99 @@ class ElevenLabsTTSAdapter implements TTSAdapter {
   }
 }
 
+/** Piper TTS via VPS API — free, fast, Portuguese voice */
+class PiperTTSAdapter implements TTSAdapter {
+  readonly provider: TTSProvider = 'piper';
+
+  private getConfig() {
+    return {
+      baseUrl: (process.env.PIPER_API_URL || 'http://167.86.85.73:5051').replace(/\/+$/, ''),
+      apiKey: process.env.PIPER_API_KEY || process.env.STT_TTS_API_KEY || '',
+    };
+  }
+
+  isConfigured(): boolean {
+    const { baseUrl, apiKey } = this.getConfig();
+    return !!baseUrl && !!apiKey;
+  }
+
+  async synthesize(request: TTSRequest): Promise<TTSResponse> {
+    const start = Date.now();
+    const { baseUrl, apiKey } = this.getConfig();
+    if (!apiKey) throw new Error('PIPER_API_KEY or STT_TTS_API_KEY not configured');
+
+    const res = await fetch(`${baseUrl}/tts`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ text: request.text }),
+    });
+
+    if (!res.ok) throw new Error(`Piper TTS error: ${res.status} ${await res.text()}`);
+
+    const audio = Buffer.from(await res.arrayBuffer());
+    return {
+      audio,
+      format: 'wav',
+      durationMs: Date.now() - start,
+      provider: 'piper',
+      charCount: request.text.length,
+    };
+  }
+
+  async listVoices() {
+    return [
+      { id: 'faber', name: 'Faber (PT-BR)', language: 'pt-BR' },
+    ];
+  }
+}
+
+/** Whisper STT via VPS API — free, faster-whisper on VPS */
+class VPSWhisperSTTAdapter implements STTAdapter {
+  readonly provider: STTProvider = 'whisper-vps';
+
+  private getConfig() {
+    return {
+      baseUrl: (process.env.WHISPER_API_URL || 'http://167.86.85.73:5051').replace(/\/+$/, ''),
+      apiKey: process.env.WHISPER_API_KEY || process.env.STT_TTS_API_KEY || '',
+    };
+  }
+
+  isConfigured(): boolean {
+    const { baseUrl, apiKey } = this.getConfig();
+    return !!baseUrl && !!apiKey;
+  }
+
+  async transcribe(request: STTRequest): Promise<STTResponse> {
+    const start = Date.now();
+    const { baseUrl, apiKey } = this.getConfig();
+    if (!apiKey) throw new Error('WHISPER_API_KEY or STT_TTS_API_KEY not configured');
+
+    const formData = new FormData();
+    const blob = new Blob([request.audio], { type: `audio/${request.format ?? 'ogg'}` });
+    formData.append('audio', blob, `audio.${request.format ?? 'ogg'}`);
+
+    const res = await fetch(`${baseUrl}/stt`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}` },
+      body: formData,
+    });
+
+    if (!res.ok) throw new Error(`Whisper VPS error: ${res.status} ${await res.text()}`);
+
+    const data = await res.json() as { text: string; language?: string };
+    return {
+      text: data.text,
+      confidence: 0.95,
+      language: data.language ?? request.language ?? 'pt',
+      durationMs: Date.now() - start,
+      provider: 'whisper-vps',
+    };
+  }
+}
+
 class OpenAISTTAdapter implements STTAdapter {
   readonly provider: STTProvider = 'whisper';
 
@@ -160,25 +253,127 @@ class OpenAISTTAdapter implements STTAdapter {
   }
 }
 
+/** Free local Whisper STT via @huggingface/transformers — no API key needed */
+class LocalWhisperSTTAdapter implements STTAdapter {
+  readonly provider: STTProvider = 'whisper-local';
+  private pipeline: any = null;
+  private loading: Promise<any> | null = null;
+
+  isConfigured(): boolean {
+    // Always available — no API key required
+    return true;
+  }
+
+  private async getPipeline(): Promise<any> {
+    if (this.pipeline) return this.pipeline;
+    if (this.loading) return this.loading;
+
+    this.loading = (async () => {
+      logger.info('Local Whisper: loading model (first time may download ~75MB)...');
+      const { pipeline } = await import('@huggingface/transformers');
+      const modelId = process.env.WHISPER_MODEL ?? 'onnx-community/whisper-tiny';
+      this.pipeline = await pipeline('automatic-speech-recognition', modelId, {
+        dtype: 'q4',
+        device: 'cpu',
+      });
+      logger.info('Local Whisper: model loaded', { model: modelId });
+      return this.pipeline;
+    })();
+
+    return this.loading;
+  }
+
+  async transcribe(request: STTRequest): Promise<STTResponse> {
+    const start = Date.now();
+
+    const transcriber = await this.getPipeline();
+
+    // Whisper expects Float32Array PCM at 16kHz mono
+    // Use ffmpeg-static (bundled binary) to decode OGG/Opus → raw PCM
+    const { writeFileSync, readFileSync, unlinkSync, mkdtempSync, rmdirSync } = await import('fs');
+    const { join } = await import('path');
+    const { tmpdir } = await import('os');
+    const { execFileSync } = await import('child_process');
+
+    const audioBuffer = request.audio instanceof ArrayBuffer
+      ? Buffer.from(request.audio)
+      : request.audio;
+
+    const ext = request.format ?? 'ogg';
+    const tempDir = mkdtempSync(join(tmpdir(), 'forgeai-stt-'));
+    const inputFile = join(tempDir, `audio.${ext}`);
+    const rawFile = join(tempDir, 'audio.raw');
+
+    try {
+      writeFileSync(inputFile, audioBuffer);
+
+      // Get ffmpeg binary path from @ffmpeg-installer/ffmpeg (npm-bundled, no system install needed)
+      const { path: ffmpegPath } = await import('@ffmpeg-installer/ffmpeg');
+
+      // Convert any audio format → raw PCM Float32 Little-Endian, 16kHz, mono
+      execFileSync(ffmpegPath, [
+        '-i', inputFile,
+        '-ar', '16000',
+        '-ac', '1',
+        '-f', 'f32le',
+        '-y', rawFile,
+      ], { stdio: 'pipe' });
+
+      // Read raw PCM and create Float32Array
+      const rawBuffer = readFileSync(rawFile);
+      const audioData = new Float32Array(rawBuffer.buffer, rawBuffer.byteOffset, rawBuffer.byteLength / 4);
+
+      logger.info('Local Whisper: audio decoded', { samples: audioData.length, durationSec: (audioData.length / 16000).toFixed(1) });
+
+      const result = await transcriber(audioData, {
+        language: request.language ?? 'pt',
+        task: 'transcribe',
+        return_timestamps: false,
+      });
+
+      const text = typeof result === 'string' ? result : (result as any).text ?? '';
+
+      return {
+        text: text.trim(),
+        confidence: 0.85,
+        language: request.language ?? 'pt',
+        durationMs: Date.now() - start,
+        provider: 'whisper-local',
+      };
+    } finally {
+      // Cleanup temp files
+      try { unlinkSync(inputFile); } catch { /* ignore */ }
+      try { unlinkSync(rawFile); } catch { /* ignore */ }
+      try { rmdirSync(tempDir); } catch { /* ignore */ }
+    }
+  }
+}
+
 export class VoiceEngine {
   private ttsAdapters: Map<TTSProvider, TTSAdapter> = new Map();
   private sttAdapters: Map<STTProvider, STTAdapter> = new Map();
   private config: VoiceConfig;
 
   constructor(config?: Partial<VoiceConfig>) {
+    // Auto-select STT: use OpenAI Whisper if key available, otherwise local (free)
+    const defaultSTT: STTProvider = process.env.OPENAI_API_KEY ? 'whisper' : 'whisper-local';
+
     this.config = {
       ttsProvider: config?.ttsProvider ?? 'openai',
-      sttProvider: config?.sttProvider ?? 'whisper',
+      sttProvider: config?.sttProvider ?? defaultSTT,
       ttsVoice: config?.ttsVoice ?? 'alloy',
       ttsSpeed: config?.ttsSpeed ?? 1.0,
-      language: config?.language ?? 'en',
+      language: config?.language ?? 'pt',
       enabled: config?.enabled ?? false,
     };
 
     this.ttsAdapters.set('openai', new OpenAITTSAdapter());
     this.ttsAdapters.set('elevenlabs', new ElevenLabsTTSAdapter());
+    this.ttsAdapters.set('piper', new PiperTTSAdapter());
     this.sttAdapters.set('whisper', new OpenAISTTAdapter());
     this.sttAdapters.set('openai', new OpenAISTTAdapter());
+    this.sttAdapters.set('whisper-local', new LocalWhisperSTTAdapter());
+    this.sttAdapters.set('whisper-vps', new VPSWhisperSTTAdapter());
 
     logger.info('Voice engine initialized', { tts: this.config.ttsProvider, stt: this.config.sttProvider });
   }
@@ -195,14 +390,87 @@ export class VoiceEngine {
     Object.assign(this.config, update);
   }
 
+  /** Strip markdown, emojis, tables, code blocks etc. for clean TTS reading */
+  sanitizeForTTS(text: string): string {
+    let clean = text;
+
+    // Remove code blocks (```...```)
+    clean = clean.replace(/```[\s\S]*?```/g, '');
+
+    // Remove inline code (`...`)
+    clean = clean.replace(/`([^`]+)`/g, '$1');
+
+    // Remove markdown tables (lines starting with |)
+    clean = clean.replace(/^\|.*\|$/gm, '');
+    // Remove table separator lines (|---|---|)
+    clean = clean.replace(/^\s*\|?\s*[-:]+\s*(\|\s*[-:]+\s*)+\|?\s*$/gm, '');
+
+    // Remove horizontal rules (---, ***, ___)
+    clean = clean.replace(/^[\s]*[-*_]{3,}[\s]*$/gm, '');
+
+    // Remove headings markers (# ## ### etc.) but keep the text
+    clean = clean.replace(/^#{1,6}\s+/gm, '');
+
+    // Remove bold/italic markers but keep text
+    clean = clean.replace(/\*\*\*(.+?)\*\*\*/g, '$1');
+    clean = clean.replace(/\*\*(.+?)\*\*/g, '$1');
+    clean = clean.replace(/\*(.+?)\*/g, '$1');
+    clean = clean.replace(/__(.+?)__/g, '$1');
+    clean = clean.replace(/_(.+?)_/g, '$1');
+    clean = clean.replace(/~~(.+?)~~/g, '$1');
+
+    // Remove markdown links [text](url) → text
+    clean = clean.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+
+    // Remove images ![alt](url)
+    clean = clean.replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1');
+
+    // Remove emojis (Unicode emoji ranges)
+    clean = clean.replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{200D}\u{20E3}\u{FE0F}]/gu, '');
+
+    // Remove bullet markers (- , * , + ) at start of line but keep text
+    clean = clean.replace(/^\s*[-*+]\s+/gm, '');
+
+    // Remove numbered list markers (1. 2. etc.)
+    clean = clean.replace(/^\s*\d+\.\s+/gm, '');
+
+    // Remove blockquote markers
+    clean = clean.replace(/^\s*>\s?/gm, '');
+
+    // Remove HTML tags
+    clean = clean.replace(/<[^>]+>/g, '');
+
+    // Remove arrows (→, ←, ↓, ↑)
+    clean = clean.replace(/[→←↓↑]/g, '');
+
+    // Collapse multiple newlines into one pause
+    clean = clean.replace(/\n{2,}/g, '\n');
+
+    // Remove lines that are empty or only whitespace
+    clean = clean.split('\n').filter(l => l.trim().length > 0).join('. ');
+
+    // Clean up multiple spaces
+    clean = clean.replace(/\s{2,}/g, ' ');
+
+    // Clean up multiple periods/dots
+    clean = clean.replace(/\.{2,}/g, '.');
+    clean = clean.replace(/\.\s*\./g, '.');
+
+    return clean.trim();
+  }
+
   async speak(text: string, options?: Partial<TTSRequest>): Promise<TTSResponse> {
     const provider = options?.provider ?? this.config.ttsProvider;
     const adapter = this.ttsAdapters.get(provider);
     if (!adapter) throw new Error(`TTS provider '${provider}' not registered`);
     if (!adapter.isConfigured()) throw new Error(`TTS provider '${provider}' not configured (missing API key)`);
 
+    // Sanitize text for clean TTS reading
+    const cleanText = this.sanitizeForTTS(text);
+    logger.debug('TTS sanitized', { original: text.length, clean: cleanText.length });
+
     return adapter.synthesize({
-      text,
+      text: cleanText,
       provider,
       voice: options?.voice ?? this.config.ttsVoice,
       speed: options?.speed ?? this.config.ttsSpeed,

@@ -43,6 +43,7 @@ export class OllamaProvider implements LLMProviderAdapter {
   readonly displayName = 'Local LLM (Ollama)';
 
   private baseUrl: string;
+  private apiKey: string;
   private cachedModels: string[] = [];
   private lastModelFetch = 0;
   private static readonly MODEL_CACHE_MS = 30_000; // refresh model list every 30s
@@ -58,9 +59,17 @@ export class OllamaProvider implements LLMProviderAdapter {
     'deepseek-r1:8b',
   ];
 
-  constructor(baseUrl?: string) {
+  constructor(baseUrl?: string, apiKey?: string) {
     this.baseUrl = (baseUrl || process.env['OLLAMA_BASE_URL'] || 'http://localhost:11434').replace(/\/+$/, '');
-    logger.info(`Ollama provider initialized → ${this.baseUrl}`);
+    this.apiKey = apiKey || process.env['OLLAMA_API_KEY'] || '';
+    logger.info(`Ollama provider initialized → ${this.baseUrl}`, { auth: this.apiKey ? 'Bearer token' : 'none' });
+  }
+
+  /** Build headers with optional auth */
+  private headers(extra?: Record<string, string>): Record<string, string> {
+    const h: Record<string, string> = { 'Content-Type': 'application/json', ...extra };
+    if (this.apiKey) h['Authorization'] = `Bearer ${this.apiKey}`;
+    return h;
   }
 
   isConfigured(): boolean {
@@ -95,6 +104,7 @@ export class OllamaProvider implements LLMProviderAdapter {
 
     try {
       const res = await fetch(`${this.baseUrl}/api/tags`, {
+        headers: this.headers(),
         signal: AbortSignal.timeout(5000),
       });
       if (!res.ok) throw new Error(`Status ${res.status}`);
@@ -132,6 +142,9 @@ export class OllamaProvider implements LLMProviderAdapter {
       model: request.model,
       messages,
       stream: false,
+      options: {
+        num_ctx: parseInt(process.env['OLLAMA_NUM_CTX'] || '2048', 10),
+      },
     };
 
     if (request.maxTokens) body['max_tokens'] = request.maxTokens;
@@ -145,26 +158,22 @@ export class OllamaProvider implements LLMProviderAdapter {
       }));
     }
 
-    logger.debug('Request', { model: request.model, endpoint: this.baseUrl, tools: request.tools?.length ?? 0 });
+    logger.debug('Request', { model: request.model, endpoint: this.baseUrl, tools: request.tools?.length ?? 0, num_ctx: (body.options as any)?.num_ctx });
 
-    // Try OpenAI-compatible endpoint first (better tool support)
-    try {
-      return await this.chatOpenAICompat(body, request);
-    } catch (compatErr) {
-      // If OpenAI endpoint fails, fall back to native Ollama /api/chat
-      if (request.tools && request.tools.length > 0) {
-        // Tools require OpenAI-compatible mode — can't fall back
-        throw compatErr;
-      }
-      logger.debug('OpenAI-compatible endpoint failed, trying native Ollama', { error: (compatErr as Error).message });
-      return this.chatNative(body, request);
+    // Use OpenAI-compatible endpoint only when tools are needed (better tool support)
+    // Otherwise use native /api/chat which properly supports num_ctx for CPU optimization
+    if (request.tools && request.tools.length > 0) {
+      return this.chatOpenAICompat(body, request);
     }
+
+    // Native endpoint supports num_ctx option for faster CPU inference
+    return this.chatNative(body, request);
   }
 
   private async chatOpenAICompat(body: Record<string, unknown>, request: LLMRequest): Promise<LLMResponse> {
     const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: this.headers(),
       body: JSON.stringify(body),
     });
 
@@ -207,7 +216,7 @@ export class OllamaProvider implements LLMProviderAdapter {
   private async chatNative(body: Record<string, unknown>, request: LLMRequest): Promise<LLMResponse> {
     const response = await fetch(`${this.baseUrl}/api/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: this.headers(),
       body: JSON.stringify(body),
     });
 
@@ -249,6 +258,9 @@ export class OllamaProvider implements LLMProviderAdapter {
       model: request.model,
       messages,
       stream: true,
+      options: {
+        num_ctx: parseInt(process.env['OLLAMA_NUM_CTX'] || '2048', 10),
+      },
     };
 
     if (request.maxTokens) body['max_tokens'] = request.maxTokens;
@@ -256,7 +268,7 @@ export class OllamaProvider implements LLMProviderAdapter {
 
     const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: this.headers(),
       body: JSON.stringify(body),
     });
 
