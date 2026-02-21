@@ -80,7 +80,7 @@ export class Gateway {
     // Initialize Fastify
     this.app = Fastify({
       logger: false,
-      trustProxy: true,
+      trustProxy: false,
       bodyLimit: 15 * 1024 * 1024, // 15MB for base64 image uploads
     });
 
@@ -882,9 +882,10 @@ export class Gateway {
 
     // ─── Generate Access Token (localhost/internal-only OR via Vault secret) ───
     this.app.post('/api/auth/generate-access', async (request: FastifyRequest, reply: FastifyReply) => {
-      const ip = request.ip;
-      const rawIp = ip.replace('::ffff:', '');
-      const isLocalhost = rawIp === '127.0.0.1' || ip === '::1' || ip === 'localhost'
+      // SECURITY: Use raw TCP socket IP — immune to X-Forwarded-For spoofing
+      const socketIp = request.socket.remoteAddress || '';
+      const rawIp = socketIp.replace('::ffff:', '');
+      const isLocalhost = rawIp === '127.0.0.1' || socketIp === '::1' || socketIp === 'localhost'
         || rawIp.startsWith('172.') || rawIp.startsWith('10.') || rawIp.startsWith('192.168.');
 
       // Check for master secret in header (for remote generation via SSH tunnel)
@@ -895,7 +896,7 @@ export class Gateway {
       if (!isLocalhost && !hasValidSecret) {
         this.auditLogger.log({
           action: 'auth.generate_denied',
-          ipAddress: ip,
+          ipAddress: socketIp,
           details: { reason: 'Non-localhost request without valid secret' },
           success: false,
           riskLevel: 'high',
@@ -910,7 +911,7 @@ export class Gateway {
 
       this.auditLogger.log({
         action: 'auth.access_token_generated',
-        ipAddress: ip,
+        ipAddress: socketIp,
         details: { expiresAt: expiresAt.toISOString(), expiresInSeconds },
         success: true,
         riskLevel: 'medium',
@@ -957,9 +958,10 @@ export class Gateway {
 
     // ─── Revoke all tokens (emergency) ───
     this.app.post('/api/auth/revoke-all', async (request: FastifyRequest, reply: FastifyReply) => {
-      const ip = request.ip;
-      const rIp = ip.replace('::ffff:', '');
-      const isLocalhost = rIp === '127.0.0.1' || ip === '::1' || ip === 'localhost'
+      // SECURITY: Use raw TCP socket IP — immune to X-Forwarded-For spoofing
+      const socketIp = request.socket.remoteAddress || '';
+      const rIp = socketIp.replace('::ffff:', '');
+      const isLocalhost = rIp === '127.0.0.1' || socketIp === '::1' || socketIp === 'localhost'
         || rIp.startsWith('172.') || rIp.startsWith('10.') || rIp.startsWith('192.168.');
       if (!isLocalhost) {
         reply.status(403).send({ error: 'Only available from localhost' });
@@ -969,7 +971,7 @@ export class Gateway {
       const count = this.accessTokenManager.revokeAll();
       this.auditLogger.log({
         action: 'auth.revoke_all',
-        ipAddress: ip,
+        ipAddress: socketIp,
         details: { revokedCount: count },
         riskLevel: 'critical',
       });
