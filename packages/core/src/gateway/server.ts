@@ -23,6 +23,8 @@ import {
   createPromptGuard,
   createInputSanitizer,
   createVault,
+  createAccessTokenManager,
+  type AccessTokenManager,
   type JWTAuth,
   type RBACEngine,
   type RateLimiter,
@@ -58,6 +60,7 @@ export class Gateway {
   public readonly inputSanitizer: InputSanitizer;
   public readonly vault: Vault;
   public readonly ipFilter: IPFilter;
+  public readonly accessTokenManager: AccessTokenManager;
 
   private host: string;
   private port: number;
@@ -87,6 +90,12 @@ export class Gateway {
     this.ipFilter = createIPFilter({
       enabled: process.env.IP_FILTER_ENABLED === 'true',
       mode: (process.env.IP_FILTER_MODE as 'allowlist' | 'blocklist') ?? 'blocklist',
+    });
+    this.accessTokenManager = createAccessTokenManager({
+      tokenTTL: 300,          // 5 minutes
+      maxActiveTokens: 5,
+      maxFailedAttempts: 10,
+      lockoutDuration: 900,   // 15 minutes
     });
 
     logger.info('Gateway instance created');
@@ -196,6 +205,56 @@ export class Gateway {
   }
 
   private registerSecurityMiddleware(): void {
+    // ─── Authentication Middleware (access token system) ───
+    // Public paths that don't require authentication
+    const AUTH_EXEMPT_EXACT = new Set([
+      '/health', '/info', '/auth/access',
+      '/api/auth/generate-access', '/api/auth/verify',
+      '/api/googlechat/webhook',
+      '/manifest.json', '/sw.js', '/forge.svg', '/favicon.ico',
+    ]);
+    const AUTH_EXEMPT_PREFIX = [
+      '/api/webhooks/receive/',   // Inbound webhook receiver
+      '/assets/',                 // Static dashboard assets (JS/CSS)
+    ];
+
+    // Check if auth is enabled (default: enabled when GATEWAY_AUTH=true or on non-localhost)
+    const authEnabled = process.env['GATEWAY_AUTH'] !== 'false';
+
+    if (authEnabled) {
+      this.app.addHook('onRequest', async (request: FastifyRequest, reply: FastifyReply) => {
+        const path = request.url.split('?')[0];
+
+        // Skip auth for exempt paths
+        if (AUTH_EXEMPT_EXACT.has(path)) return;
+        if (AUTH_EXEMPT_PREFIX.some(prefix => path.startsWith(prefix))) return;
+
+        // Check JWT from cookie or Authorization header
+        const jwt = this.extractJWT(request);
+        if (jwt) {
+          try {
+            this.auth.verifyAccessToken(jwt);
+            return; // Valid session — allow through
+          } catch {
+            // Invalid/expired token — clear cookie and block
+            reply.header('Set-Cookie', 'forgeai_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0');
+          }
+        }
+
+        // Not authenticated — block
+        if (path.startsWith('/api/')) {
+          // API calls get 401 JSON
+          reply.status(401).send({ error: 'Authentication required', authUrl: '/auth/access' });
+        } else {
+          // Page requests get redirected to access page
+          reply.redirect('/auth/access');
+        }
+      });
+      logger.info('🔒 Authentication middleware enabled (access token system)');
+    } else {
+      logger.warn('⚠️ Authentication middleware DISABLED (GATEWAY_AUTH=false)');
+    }
+
     // Paths exempt from rate limiting (health checks, dashboard polling, static assets)
     const RATE_LIMIT_EXEMPT = new Set(['/health', '/info', '/api/providers', '/api/chat/sessions']);
     // Also exempt progress polling and static dashboard assets
@@ -611,43 +670,235 @@ export class Gateway {
   }
 
   private registerAuthRoutes(): void {
-    // Login
-    this.app.post('/api/auth/login', async (request: FastifyRequest, reply: FastifyReply) => {
-      const { username, password } = request.body as { username: string; password: string };
+    // ─── Access Token Exchange: token → JWT cookie → redirect ───
+    this.app.get('/auth/access', async (request: FastifyRequest, reply: FastifyReply) => {
+      const query = request.query as { token?: string };
 
-      if (!username || !password) {
-        reply.status(400).send({ error: 'Username and password required' });
+      if (!query.token) {
+        // Serve access page HTML
+        reply.header('Content-Type', 'text/html');
+        return reply.send(this.getAccessPageHTML());
+      }
+
+      // Validate the temporary access token
+      const result = this.accessTokenManager.validate(query.token, request.ip);
+      if (!result.valid) {
+        this.auditLogger.log({
+          action: 'auth.access_token_failed',
+          ipAddress: request.ip,
+          details: { reason: result.reason },
+          success: false,
+          riskLevel: 'high',
+        });
+        reply.header('Content-Type', 'text/html');
+        return reply.send(this.getAccessPageHTML(result.reason));
+      }
+
+      // Generate JWT session
+      const tokenPair = this.auth.generateTokenPair({
+        userId: 'admin',
+        username: 'admin',
+        role: UserRole.ADMIN,
+        sessionId: `access-${Date.now()}`,
+      });
+
+      this.auditLogger.log({
+        action: 'auth.access_token_used',
+        ipAddress: request.ip,
+        details: { expiresAt: tokenPair.expiresAt.toISOString() },
+        success: true,
+        riskLevel: 'medium',
+      });
+
+      // Set HTTP-only cookie
+      reply.header('Set-Cookie',
+        `forgeai_session=${tokenPair.accessToken}; Path=/; HttpOnly; SameSite=Strict; Max-Age=86400`
+      );
+
+      logger.info('Access token exchanged for JWT session', { ip: request.ip, expiresAt: tokenPair.expiresAt.toISOString() });
+
+      // Redirect to dashboard
+      reply.redirect('/dashboard');
+    });
+
+    // ─── Generate Access Token (localhost-only OR via Vault secret) ───
+    this.app.post('/api/auth/generate-access', async (request: FastifyRequest, reply: FastifyReply) => {
+      const ip = request.ip;
+      const isLocalhost = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1' || ip === 'localhost';
+
+      // Check for master secret in header (for remote generation via SSH tunnel)
+      const masterSecret = request.headers['x-forgeai-secret'] as string | undefined;
+      const storedSecret = this.vault.isInitialized() ? this.vault.get('system:master_secret') : undefined;
+      const hasValidSecret = masterSecret && storedSecret && masterSecret === storedSecret;
+
+      if (!isLocalhost && !hasValidSecret) {
+        this.auditLogger.log({
+          action: 'auth.generate_denied',
+          ipAddress: ip,
+          details: { reason: 'Non-localhost request without valid secret' },
+          success: false,
+          riskLevel: 'high',
+        });
+        reply.status(403).send({ error: 'Access token generation is only available from localhost' });
         return;
       }
 
-      // TODO: lookup user in DB, verify password
-      // For now, return a placeholder
+      const { token, expiresAt, expiresInSeconds } = this.accessTokenManager.generate();
+      const baseUrl = `http://${this.host === '0.0.0.0' ? request.hostname : this.host}:${this.port}`;
+      const accessUrl = `${baseUrl}/auth/access?token=${token}`;
+
       this.auditLogger.log({
-        action: 'auth.login',
-        ipAddress: request.ip,
-        details: { username },
+        action: 'auth.access_token_generated',
+        ipAddress: ip,
+        details: { expiresAt: expiresAt.toISOString(), expiresInSeconds },
+        success: true,
+        riskLevel: 'medium',
       });
 
-      reply.status(501).send({ error: 'Auth backend not yet connected to database' });
+      return {
+        accessUrl,
+        token,
+        expiresAt: expiresAt.toISOString(),
+        expiresInSeconds,
+      };
     });
 
-    // Verify token
+    // ─── Verify JWT ───
     this.app.get('/api/auth/verify', async (request: FastifyRequest, reply: FastifyReply) => {
-      const authHeader = request.headers.authorization;
-      if (!authHeader?.startsWith('Bearer ')) {
-        reply.status(401).send({ error: 'Missing authorization header' });
+      const jwt = this.extractJWT(request);
+      if (!jwt) {
+        reply.status(401).send({ error: 'Not authenticated' });
         return;
       }
 
       try {
-        const token = authHeader.slice(7);
-        const payload = this.auth.verifyAccessToken(token);
+        const payload = this.auth.verifyAccessToken(jwt);
         return { valid: true, user: payload };
       } catch {
-        reply.status(401).send({ error: 'Invalid or expired token' });
+        reply.status(401).send({ error: 'Invalid or expired session' });
         return;
       }
     });
+
+    // ─── Logout (revoke session) ───
+    this.app.post('/api/auth/logout', async (request: FastifyRequest, reply: FastifyReply) => {
+      const jwt = this.extractJWT(request);
+      if (jwt) {
+        try {
+          const payload = this.auth.verifyAccessToken(jwt);
+          this.auth.revokeToken(payload.jti);
+        } catch { /* token already invalid */ }
+      }
+
+      reply.header('Set-Cookie', 'forgeai_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0');
+      return { success: true };
+    });
+
+    // ─── Revoke all tokens (emergency) ───
+    this.app.post('/api/auth/revoke-all', async (request: FastifyRequest, reply: FastifyReply) => {
+      const ip = request.ip;
+      const isLocalhost = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+      if (!isLocalhost) {
+        reply.status(403).send({ error: 'Only available from localhost' });
+        return;
+      }
+
+      const count = this.accessTokenManager.revokeAll();
+      this.auditLogger.log({
+        action: 'auth.revoke_all',
+        ipAddress: ip,
+        details: { revokedCount: count },
+        riskLevel: 'critical',
+      });
+      return { success: true, revokedAccessTokens: count };
+    });
+  }
+
+  /**
+   * Extract JWT from cookie or Authorization header.
+   */
+  private extractJWT(request: FastifyRequest): string | null {
+    // Check cookie first
+    const cookieHeader = request.headers.cookie;
+    if (cookieHeader) {
+      const match = cookieHeader.match(/forgeai_session=([^;]+)/);
+      if (match) return match[1];
+    }
+
+    // Check Authorization header
+    const authHeader = request.headers.authorization;
+    if (authHeader?.startsWith('Bearer ')) {
+      return authHeader.slice(7);
+    }
+
+    return null;
+  }
+
+  /**
+   * Generate the access page HTML (shown when no token or invalid token).
+   */
+  private getAccessPageHTML(error?: string): string {
+    const errorBlock = error
+      ? `<div style="background:#ff4444;color:white;padding:12px 20px;border-radius:8px;margin-bottom:24px;font-size:14px;">⚠️ ${error}</div>`
+      : '';
+
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ForgeAI — Access Required</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0a0a0a; color: #e0e0e0; min-height: 100vh;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .container {
+      max-width: 520px; width: 90%; text-align: center;
+      background: #1a1a1a; border: 1px solid #333; border-radius: 16px;
+      padding: 48px 36px;
+    }
+    .logo { font-size: 48px; margin-bottom: 16px; }
+    h1 { font-size: 24px; font-weight: 700; margin-bottom: 8px; color: #fff; }
+    .subtitle { color: #888; font-size: 14px; margin-bottom: 32px; }
+    .instruction {
+      background: #111; border: 1px solid #2a2a2a; border-radius: 10px;
+      padding: 20px; text-align: left; margin-bottom: 24px;
+    }
+    .instruction h3 { font-size: 13px; color: #ff6b35; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
+    .code-block {
+      background: #000; border: 1px solid #333; border-radius: 6px;
+      padding: 12px 16px; font-family: 'Fira Code', monospace; font-size: 13px;
+      color: #4ade80; word-break: break-all; line-height: 1.6;
+      margin-top: 8px;
+    }
+    .step { color: #999; font-size: 13px; margin-bottom: 8px; line-height: 1.5; }
+    .step strong { color: #ccc; }
+    .divider { border: none; border-top: 1px solid #2a2a2a; margin: 24px 0; }
+    .footer { color: #555; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">🔥</div>
+    <h1>ForgeAI</h1>
+    <p class="subtitle">Dashboard access requires authentication</p>
+    ${errorBlock}
+    <div class="instruction">
+      <h3>How to access</h3>
+      <p class="step"><strong>1.</strong> Connect to your server via SSH</p>
+      <p class="step"><strong>2.</strong> Run the following command:</p>
+      <div class="code-block">curl -s -X POST http://127.0.0.1:${this.port}/api/auth/generate-access | jq</div>
+      <p class="step" style="margin-top:12px;"><strong>3.</strong> Open the <strong>accessUrl</strong> in your browser</p>
+      <p class="step"><strong>4.</strong> Your session will be valid for <strong>24 hours</strong></p>
+    </div>
+    <hr class="divider">
+    <p class="footer">Access tokens expire in 5 minutes · Sessions last 24h · IP lockout after 10 failed attempts</p>
+  </div>
+</body>
+</html>`;
   }
 
   private registerWSRoutes(): void {
@@ -821,7 +1072,18 @@ export class Gateway {
       await this.app.listen({ host: this.host, port: this.port });
       logger.info(`🔥 ${APP_NAME} Gateway running at http://${this.host}:${this.port}`);
       logger.info(`🔌 WebSocket available at ws://${this.host}:${this.port}/ws`);
-      logger.info(`🛡️  Security modules: RBAC ✓ | Vault ✓ | RateLimit ✓ | PromptGuard ✓ | AuditLog ✓ | 2FA ✓`);
+      logger.info(`🛡️  Security modules: RBAC ✓ | Vault ✓ | RateLimit ✓ | PromptGuard ✓ | AuditLog ✓ | AccessToken ✓`);
+
+      // Generate and print startup access URL
+      if (process.env['GATEWAY_AUTH'] !== 'false') {
+        const { token, expiresAt } = this.accessTokenManager.generate();
+        const displayHost = this.host === '0.0.0.0' ? '127.0.0.1' : this.host;
+        const accessUrl = `http://${displayHost}:${this.port}/auth/access?token=${token}`;
+        logger.info(`🔑 Dashboard access URL (valid 5 min):`);
+        logger.info(`   ${accessUrl}`);
+        logger.info(`   Expires at: ${expiresAt.toISOString()}`);
+        logger.info(`   Generate new: curl -s -X POST http://127.0.0.1:${this.port}/api/auth/generate-access`);
+      }
 
       // Schedule daily audit log rotation (every 24h, keep 90 days)
       const ROTATION_INTERVAL = 24 * 60 * 60 * 1000;

@@ -32,7 +32,12 @@ export type AuditAction =
   | 'security.alert_sent'
   | 'security.integrity_check'
   | 'security.rbac_denied'
-  | 'audit.export';
+  | 'audit.export'
+  | 'auth.access_token_failed'
+  | 'auth.access_token_used'
+  | 'auth.access_token_generated'
+  | 'auth.generate_denied'
+  | 'auth.revoke_all';
 
 export interface AuditLogEntry {
   id: string;

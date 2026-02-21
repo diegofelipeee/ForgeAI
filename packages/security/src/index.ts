@@ -19,3 +19,5 @@ export { APIKeyManager, createAPIKeyManager } from './api-key-manager.js';
 export type { APIKey, APIKeyCreateResult, APIKeyValidation } from './api-key-manager.js';
 export { GDPRManager, createGDPRManager } from './gdpr.js';
 export type { GDPRUserData, GDPRDeleteResult } from './gdpr.js';
+export { AccessTokenManager, createAccessTokenManager } from './access-token.js';
+export type { AccessToken, AccessTokenConfig } from './access-token.js';
