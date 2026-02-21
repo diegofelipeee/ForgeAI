@@ -18,6 +18,7 @@ import { WebhooksPage } from './pages/Webhooks';
 import { CalendarPage } from './pages/Calendar';
 import { VoicePage } from './pages/Voice';
 import { RAGPage } from './pages/RAG';
+import { CanvasPage } from './pages/Canvas';
 
 export function App() {
   return (
@@ -41,6 +42,7 @@ export function App() {
         <Route path="/calendar" element={<CalendarPage />} />
         <Route path="/voice" element={<VoicePage />} />
         <Route path="/rag" element={<RAGPage />} />
+        <Route path="/canvas" element={<CanvasPage />} />
       </Route>
     </Routes>
     </I18nProvider>
