@@ -1,0 +1,77 @@
+# Gitleaks configuration for ForgeAI
+# https://github.com/gitleaks/gitleaks
+
+title = "ForgeAI Secret Scanning"
+
+[allowlist]
+  description = "Global allowlist"
+  paths = [
+    '''pnpm-lock\.yaml''',
+    '''\.test\.ts$''',
+    '''\.spec\.ts$''',
+    '''dist/''',
+    '''node_modules/''',
+  ]
+  regexTarget = "match"
+
+# Ignore CI test secrets (clearly marked as test-only)
+[[rules]]
+  id = "ci-test-secrets"
+  description = "CI test secrets (clearly not production)"
+  regex = '''ci-test-.*-do-not-use'''
+  [rules.allowlist]
+    regexTarget = "match"
+    regexes = ['''.*''']
+
+# Detect generic API keys
+[[rules]]
+  id = "generic-api-key"
+  description = "Generic API Key"
+  regex = '''(?i)(api[_-]?key|apikey|api[_-]?secret)\s*[:=]\s*['"]([\w\-]{20,})['"]\s'''
+  tags = ["key", "api"]
+
+# Detect hardcoded passwords
+[[rules]]
+  id = "hardcoded-password"
+  description = "Hardcoded Password"
+  regex = '''(?i)(password|passwd|pwd|secret)\s*[:=]\s*['"]([^'"]{8,})['"]\s'''
+  tags = ["password"]
+  [rules.allowlist]
+    regexes = [
+      '''placeholder''',
+      '''example''',
+      '''changeme''',
+      '''your-.*-here''',
+      '''ci-test''',
+      '''do-not-use''',
+    ]
+
+# Detect JWT secrets
+[[rules]]
+  id = "jwt-secret"
+  description = "JWT Secret"
+  regex = '''(?i)(jwt[_-]?secret)\s*[:=]\s*['"]([^'"]{10,})['"]\s'''
+  tags = ["jwt"]
+  [rules.allowlist]
+    regexes = ['''ci-test''', '''do-not-use''']
+
+# Detect private keys
+[[rules]]
+  id = "private-key"
+  description = "Private Key"
+  regex = '''-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----'''
+  tags = ["key", "private"]
+
+# Detect Telegram bot tokens
+[[rules]]
+  id = "telegram-token"
+  description = "Telegram Bot Token"
+  regex = '''[0-9]{8,10}:[A-Za-z0-9_-]{35}'''
+  tags = ["telegram"]
+
+# Detect AWS keys
+[[rules]]
+  id = "aws-access-key"
+  description = "AWS Access Key"
+  regex = '''AKIA[0-9A-Z]{16}'''
+  tags = ["aws"]
