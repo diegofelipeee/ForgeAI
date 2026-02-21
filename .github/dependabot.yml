@@ -22,6 +22,10 @@ updates:
     commit-message:
       prefix: "deps"
       include: "scope"
+    # Ignore packages that shouldn't be updated
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     # Group minor/patch updates to reduce PR noise
     groups:
       production-deps:
