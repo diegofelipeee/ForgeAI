@@ -13,7 +13,7 @@
     "@forgeai/security": "workspace:*",
     "cheerio": "^1.0.0",
     "node-cron": "^3.0.3",
-    "puppeteer": "^24.0.0"
+    "puppeteer": "^24.37.5"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
