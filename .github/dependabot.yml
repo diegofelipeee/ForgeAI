@@ -1,43 +1,13 @@
 # Dependabot configuration for ForgeAI
-# Automatically creates PRs to update vulnerable or outdated dependencies
+# SECURITY-ONLY: only creates PRs for known vulnerabilities (CVEs)
+# Does NOT create PRs for version bumps — we update manually when needed.
 # https://docs.github.com/en/code-security/dependabot
 
 version: 2
 
 updates:
-  # ─── npm (pnpm) dependencies ──────────────────────
+  # ─── npm (pnpm) — security patches only ───────────
   - package-ecosystem: "npm"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "09:00"
-      timezone: "America/Sao_Paulo"
-    open-pull-requests-limit: 10
-    reviewers:
-      - "diegofelipeee"
-    labels:
-      - "dependencies"
-      - "automated"
-    commit-message:
-      prefix: "deps"
-      include: "scope"
-    # Group minor/patch updates to reduce PR noise
-    groups:
-      production-deps:
-        patterns:
-          - "*"
-        update-types:
-          - "minor"
-          - "patch"
-      major-updates:
-        patterns:
-          - "*"
-        update-types:
-          - "major"
-
-  # ─── GitHub Actions ───────────────────────────────
-  - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
@@ -48,13 +18,21 @@ updates:
     reviewers:
       - "diegofelipeee"
     labels:
-      - "ci"
-      - "automated"
+      - "security"
+      - "dependencies"
     commit-message:
-      prefix: "ci"
+      prefix: "security"
+      include: "scope"
+    # Only allow security updates — ignore all version bumps
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
+          - "version-update:semver-patch"
 
-  # ─── Docker ───────────────────────────────────────
-  - package-ecosystem: "docker"
+  # ─── GitHub Actions — security patches only ───────
+  - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
@@ -65,7 +43,36 @@ updates:
     reviewers:
       - "diegofelipeee"
     labels:
-      - "docker"
-      - "automated"
+      - "security"
+      - "ci"
     commit-message:
-      prefix: "docker"
+      prefix: "security"
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
+          - "version-update:semver-patch"
+
+  # ─── Docker — security patches only ───────────────
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Sao_Paulo"
+    open-pull-requests-limit: 2
+    reviewers:
+      - "diegofelipeee"
+    labels:
+      - "security"
+      - "docker"
+    commit-message:
+      prefix: "security"
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
+          - "version-update:semver-patch"
