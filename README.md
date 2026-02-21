@@ -244,6 +244,18 @@ The dashboard is a full-featured React 19 SPA served directly by the Gateway. No
 | **Canvas** | ForgeCanvas: live visual artifacts (HTML, React, SVG, Mermaid, Charts, Markdown, Code) rendered in sandboxed iframes with bidirectional agent↔artifact interaction |
 | **Recordings** | Session Recording & Replay: record full agent sessions, timeline player with play/pause/scrub, step-by-step visualization (messages, tool calls, thinking, progress) |
 
+### 🖥️ Electron Desktop App
+
+Native desktop wrapper (`packages/desktop`) for Windows, macOS, and Linux:
+- **System Tray** — runs in background, double-click to show, context menu with quick actions
+- **Global Hotkeys** — `Ctrl+Shift+F` toggle window, `Ctrl+Shift+C` quick chat
+- **Native Notifications** — OS-level notifications for agent events
+- **Auto-Update** — automatic updates via GitHub Releases (electron-updater)
+- **Startup on Boot** — optional auto-start with OS
+- **Single Instance** — prevents multiple windows
+- **Minimize to Tray** — close button minimizes instead of quitting
+- **Persistent Settings** — gateway URL, window bounds, preferences stored in user data
+
 ---
 
 ## 🧠 Advanced Capabilities
@@ -739,7 +751,7 @@ All core features are implemented and tested:
 
 | Feature | Priority |
 |:--------|:---------|
-| Electron desktop app | Medium |
+| ~~Electron desktop app~~ | ✅ Done |
 | React Native mobile app (iOS + Android) | Medium |
 | Signal messenger channel | Low |
 | ~~Voice wake word detection (Porcupine/Picovoice)~~ | ✅ Done |

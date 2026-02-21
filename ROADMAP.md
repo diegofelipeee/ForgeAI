@@ -87,10 +87,10 @@
 
 > ✅ **Já implementados:** Tailscale remote access (Fase 12), E2E Tests 38 Vitest (Fase 12-14), CI/CD GitHub Actions (Fase 13), OpenTelemetry (Fase 22)
 
-### 🔴 Apps Nativas (2 restantes)
+### 🔴 Apps Nativas (1 restante)
 | Feature | Descrição | Complexidade |
 |---------|-----------|-------------|
-| Electron app | Desktop wrapper do Dashboard (Windows/Mac/Linux) | Média |
+| ~~Electron app~~ | ~~Desktop wrapper do Dashboard (Windows/Mac/Linux)~~ | ✅ Done |
 | React Native / Expo | App mobile com chat + notificações push | Alta |
 | ~~Voice Wake Word~~ | ~~Porcupine/Picovoice para ativação por voz "Hey Forge"~~ | ✅ Done |
 
@@ -118,11 +118,11 @@
 Channels:        3 restantes (Signal, iMessage, Matrix)
 Agent Avançado:  0 restantes ✅ COMPLETO
 Infraestrutura:  2 restantes (Log aggregation, DB migrations auto)
-Apps Nativas:    3 restantes (Electron, React Native, Voice Wake)
+Apps Nativas:    1 restante (React Native)
 Integrações:     1 restante (Spotify/HA)
 Segurança:       0 restantes ✅ COMPLETO (DB encryption → nice-to-have)
 ────────────────────────────────────────
-Total:          12 features restantes (de 37 originais — 68% concluído!)
+Total:          11 features restantes (de 37 originais — 70% concluído!)
 ```
 
 ### Priorização Sugerida — Próximas Fases
