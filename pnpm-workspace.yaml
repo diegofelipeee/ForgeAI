@@ -1,13 +1,14 @@
 packages:
   - packages/*
 
+ignoredBuiltDependencies:
+  - bcrypt
+  - electron
+  - esbuild
+  - protobufjs
+  - puppeteer
+
 onlyBuiltDependencies:
   - '@ffmpeg-installer/ffmpeg'
   - onnxruntime-node
   - sharp
-
-ignoredBuiltDependencies:
-  - bcrypt
-  - esbuild
-  - protobufjs
-  - puppeteer

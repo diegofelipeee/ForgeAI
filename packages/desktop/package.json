@@ -1,0 +1,69 @@
+{
+  "name": "@forgeai/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ForgeAI Desktop — Native Electron wrapper with system tray, global hotkeys, notifications, and auto-update",
+  "main": "dist/main.js",
+  "type": "commonjs",
+  "scripts": {
+    "dev": "electron .",
+    "build": "tsc -p tsconfig.json",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.0"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.0",
+    "typescript": "^5.5.0",
+    "@types/node": "^22.0.0"
+  },
+  "build": {
+    "appId": "ai.forge.desktop",
+    "productName": "ForgeAI",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "assets/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../dashboard/dist",
+        "to": "dashboard",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": ["nsis", "portable"],
+      "icon": "assets/icon.ico"
+    },
+    "mac": {
+      "target": ["dmg", "zip"],
+      "icon": "assets/icon.icns",
+      "category": "public.app-category.productivity"
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "icon": "assets/icon.png",
+      "category": "Utility"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "forgeai-dev",
+      "repo": "ForgeAI"
+    }
+  }
+}
