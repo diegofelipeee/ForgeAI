@@ -109,6 +109,7 @@ jobs:
           MYSQL_PASSWORD: forgeai_test
           MYSQL_DATABASE: forgeai_test
           GATEWAY_PORT: 18800
+          GATEWAY_AUTH: 'false'
           JWT_SECRET: ci-test-jwt-secret-do-not-use-in-prod
           VAULT_MASTER_PASSWORD: ci-test-vault-password-do-not-use
           NODE_ENV: test
