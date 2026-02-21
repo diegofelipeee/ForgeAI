@@ -25,15 +25,16 @@ export class CronSchedulerTool extends BaseTool {
 
   readonly definition: ToolDefinition = {
     name: 'cron_scheduler',
-    description: 'Schedule, list, and manage recurring tasks using cron expressions. Tasks execute a callback with the defined action and parameters.',
+    description: 'Schedule, list, and manage recurring tasks using cron expressions. Scheduled tasks will be delivered as proactive messages to the user through their active channel (Telegram, Discord, WhatsApp, WebChat, etc.). Use this for reminders, periodic checks, and automated notifications. The message will be sent directly to the user who created the task.',
     category: 'scheduler',
     dangerous: true,
     parameters: [
       { name: 'action', type: 'string', description: 'Action: "schedule", "list", "cancel", "pause", "resume"', required: true },
-      { name: 'expression', type: 'string', description: 'Cron expression (e.g. "*/5 * * * *" = every 5 min)', required: false },
+      { name: 'expression', type: 'string', description: 'Cron expression (e.g. "*/5 * * * *" = every 5 min, "30 9 * * *" = daily at 9:30)', required: false },
       { name: 'description', type: 'string', description: 'Human-readable task description', required: false },
-      { name: 'taskAction', type: 'string', description: 'What the task should do (passed to callback)', required: false },
-      { name: 'taskParams', type: 'object', description: 'Parameters for the task action', required: false },
+      { name: 'taskAction', type: 'string', description: 'What the task should do: "send_reminder", "check_url", "notify", etc.', required: false },
+      { name: 'message', type: 'string', description: 'Message content to deliver when the task fires (for reminders)', required: false },
+      { name: 'taskParams', type: 'object', description: 'Additional parameters for the task action', required: false },
       { name: 'taskId', type: 'string', description: 'Task ID (for cancel/pause/resume)', required: false },
     ],
   };
@@ -62,12 +63,20 @@ export class CronSchedulerTool extends BaseTool {
           }
 
           const id = generateId('task');
+          // Auto-capture caller context for proactive delivery
+          const callerUserId = params['__userId'] as string | undefined;
+          const taskMessage = String(params['message'] || '');
+          const enrichedParams = {
+            ...taskParams,
+            ...(callerUserId ? { __userId: callerUserId } : {}),
+            ...(taskMessage ? { message: taskMessage } : {}),
+          };
           const scheduledTask: ScheduledTask = {
             id,
             expression,
             description,
             action: taskAction,
-            params: taskParams,
+            params: enrichedParams,
             createdAt: new Date(),
             runCount: 0,
             active: true,

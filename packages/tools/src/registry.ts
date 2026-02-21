@@ -91,7 +91,9 @@ export class ToolRegistry {
     }
 
     try {
-      const result = await tool.execute(params);
+      // Inject caller context so tools like cron_scheduler can track who scheduled tasks
+      const execParams = userId ? { ...params, __userId: userId } : params;
+      const result = await tool.execute(execParams);
 
       this.auditLogger.log({
         action: 'tool.execute',

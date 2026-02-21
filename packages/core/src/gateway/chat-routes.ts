@@ -4,7 +4,7 @@ import type { AgentConfig } from '@forgeai/shared';
 import { AgentRuntime, AgentManager, createAgentManager, createLLMRouter } from '@forgeai/agent';
 import { getWSBroadcaster } from './ws-broadcaster.js';
 import { WebChatChannel, TeamsChannel, createTeamsChannel, TelegramChannel, createTelegramChannel, WhatsAppChannel, createWhatsAppChannel, GoogleChatChannel, createGoogleChatChannel, NodeChannel, createNodeChannel } from '@forgeai/channels';
-import { createDefaultToolRegistry, type ToolRegistry, createSandboxManager, type SandboxManager, setAgentManagerRef } from '@forgeai/tools';
+import { createDefaultToolRegistry, type ToolRegistry, createSandboxManager, type SandboxManager, setAgentManagerRef, CronSchedulerTool } from '@forgeai/tools';
 import { createAdvancedRateLimiter, type AdvancedRateLimiter, createIPFilter, type IPFilter, type Vault } from '@forgeai/security';
 import { createTailscaleHelper, type TailscaleHelper } from '../remote/tailscale-helper.js';
 import { createPluginManager, AutoResponderPlugin, ContentFilterPlugin, ChatCommandsPlugin, type PluginManager, createPluginSDK, type PluginSDK } from '@forgeai/plugins';
@@ -61,6 +61,9 @@ let nodeChannel: NodeChannel | null = null;
 let wakeWordManager: WakeWordManager | null = null;
 let artifactManager: ArtifactManager | null = null;
 let sessionRecorder: SessionRecorder | null = null;
+
+// Maps userId → last known channel delivery target for proactive messages (cron, reminders)
+const userChannelMap = new Map<string, { channelType: string; chatId: string }>();
 
 export function getAgentRuntime(): AgentRuntime | null {
   return agentRuntime;
@@ -355,6 +358,85 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
   // Wire session tools with AgentManager for agent-to-agent communication
   setAgentManagerRef(agentManager);
 
+  // Wire CronSchedulerTool callback for proactive message delivery
+  const cronTool = toolRegistry.get('cron_scheduler') as CronSchedulerTool | undefined;
+  if (cronTool) {
+    cronTool.setCallback(async (task) => {
+      const userId = task.params['__userId'] as string | undefined;
+      const message = task.params['message'] as string || task.description;
+      const deliveryContent = `🔔 **Lembrete** [${task.description}]\n\n${message}`;
+
+      logger.info('Cron task fired, delivering proactive message', {
+        taskId: task.id, description: task.description, userId, action: task.action,
+      });
+
+      let delivered = false;
+
+      // Try to deliver to user's last active channel
+      if (userId) {
+        const target = userChannelMap.get(userId);
+        if (target) {
+          try {
+            if (target.channelType === 'telegram' && telegramChannel?.isConnected()) {
+              await telegramChannel.send({
+                channelType: 'telegram',
+                recipientId: target.chatId,
+                content: deliveryContent,
+              });
+              delivered = true;
+              logger.info('Cron delivered via Telegram', { taskId: task.id, chatId: target.chatId });
+            } else if (target.channelType === 'whatsapp' && whatsAppChannel?.isConnected()) {
+              await whatsAppChannel.send({
+                channelType: 'whatsapp',
+                recipientId: target.chatId,
+                content: deliveryContent,
+              });
+              delivered = true;
+              logger.info('Cron delivered via WhatsApp', { taskId: task.id, chatId: target.chatId });
+            }
+          } catch (err) {
+            logger.error('Cron channel delivery failed', err, { taskId: task.id });
+          }
+        }
+      }
+
+      // Fallback: deliver to Telegram admin if no user target found
+      if (!delivered && telegramChannel?.isConnected()) {
+        try {
+          const tgPerms = telegramChannel.getPermissions();
+          const adminId = tgPerms.adminUsers[0];
+          if (adminId && adminId !== '*') {
+            await telegramChannel.send({
+              channelType: 'telegram',
+              recipientId: adminId,
+              content: deliveryContent,
+            });
+            delivered = true;
+            logger.info('Cron delivered to Telegram admin (fallback)', { taskId: task.id, adminId });
+          }
+        } catch (err) {
+          logger.error('Cron admin fallback delivery failed', err, { taskId: task.id });
+        }
+      }
+
+      // Broadcast to dashboard WebSocket as well
+      const wsBroadcaster = getWSBroadcaster();
+      wsBroadcaster.broadcastAll({
+        type: 'cron.task_fired',
+        taskId: task.id,
+        description: task.description,
+        message,
+        delivered,
+        timestamp: new Date().toISOString(),
+      });
+
+      if (!delivered) {
+        logger.warn('Cron task fired but could not deliver to any channel', { taskId: task.id });
+      }
+    });
+    logger.info('CronSchedulerTool callback wired for proactive delivery');
+  }
+
   logger.info(`Tool registry initialized: ${toolRegistry.size} tools registered (attached to ${agentManager.size} agents)`);
 
   // Initialize Plugin Manager
@@ -574,8 +656,11 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
       telegramChannel.onMessage(async (inbound) => {
         if (!agentManager) return;
 
-        // React with 👀 to show ForgeAI saw the message
+        // Track user's active channel for proactive delivery (cron, reminders)
         const tgChatId = inbound.groupId ?? inbound.senderId;
+        userChannelMap.set(inbound.senderId, { channelType: 'telegram', chatId: tgChatId });
+
+        // React with 👀 to show ForgeAI saw the message
         await telegramChannel!.setMessageReaction(tgChatId, Number(inbound.channelMessageId), '👀');
 
         const sessionId = inbound.groupId
@@ -842,6 +927,10 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
       // Wire WhatsApp inbound → Chat Commands → AgentManager → response
       whatsAppChannel.onMessage(async (inbound) => {
         if (!agentManager) return;
+
+        // Track user's active channel for proactive delivery (cron, reminders)
+        const waChatId = inbound.groupId ?? inbound.senderId;
+        userChannelMap.set(inbound.senderId, { channelType: 'whatsapp', chatId: waChatId });
 
         const sessionId = inbound.groupId
           ? `wa-group-${inbound.groupId}`

@@ -2,6 +2,8 @@ import Fastify, { type FastifyInstance, type FastifyRequest, type FastifyReply }
 import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 import multipart from '@fastify/multipart';
+import formbody from '@fastify/formbody';
+import QRCode from 'qrcode';
 import {
   createLogger,
   APP_NAME,
@@ -23,6 +25,10 @@ import {
   createPromptGuard,
   createInputSanitizer,
   createVault,
+  createAccessTokenManager,
+  createTwoFactorAuth,
+  type AccessTokenManager,
+  type TwoFactorAuth,
   type JWTAuth,
   type RBACEngine,
   type RateLimiter,
@@ -58,6 +64,16 @@ export class Gateway {
   public readonly inputSanitizer: InputSanitizer;
   public readonly vault: Vault;
   public readonly ipFilter: IPFilter;
+  public readonly accessTokenManager: AccessTokenManager;
+  public readonly twoFactor: TwoFactorAuth;
+
+  // Pending sessions: access token validated but 2FA not yet verified
+  private pendingSessions: Map<string, { createdAt: number; ip: string }> = new Map();
+
+  // Rate limiter for auth endpoints (brute-force protection)
+  private authAttempts: Map<string, { count: number; firstAttempt: number }> = new Map();
+  private static readonly AUTH_RATE_LIMIT = 5; // max attempts
+  private static readonly AUTH_RATE_WINDOW = 60_000; // 1 minute window
 
   private host: string;
   private port: number;
@@ -69,7 +85,7 @@ export class Gateway {
     // Initialize Fastify
     this.app = Fastify({
       logger: false,
-      trustProxy: true,
+      trustProxy: false,
       bodyLimit: 15 * 1024 * 1024, // 15MB for base64 image uploads
     });
 
@@ -88,6 +104,13 @@ export class Gateway {
       enabled: process.env.IP_FILTER_ENABLED === 'true',
       mode: (process.env.IP_FILTER_MODE as 'allowlist' | 'blocklist') ?? 'blocklist',
     });
+    this.accessTokenManager = createAccessTokenManager({
+      tokenTTL: 300,          // 5 minutes
+      maxActiveTokens: 5,
+      maxFailedAttempts: 10,
+      lockoutDuration: 900,   // 15 minutes
+    });
+    this.twoFactor = createTwoFactorAuth('ForgeAI');
 
     logger.info('Gateway instance created');
   }
@@ -101,6 +124,7 @@ export class Gateway {
 
     await this.app.register(websocket);
     await this.app.register(multipart, { limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB max
+    await this.app.register(formbody); // For HTML form POST (2FA forms)
 
     // Register routes
     this.registerHealthRoutes();
@@ -196,6 +220,57 @@ export class Gateway {
   }
 
   private registerSecurityMiddleware(): void {
+    // ─── Authentication Middleware (access token system) ───
+    // Public paths that don't require authentication
+    const AUTH_EXEMPT_EXACT = new Set([
+      '/health', '/info', '/auth/access',
+      '/api/auth/generate-access', '/api/auth/verify',
+      '/auth/verify-totp', '/auth/setup-2fa',
+      '/api/googlechat/webhook',
+      '/manifest.json', '/sw.js', '/forge.svg', '/favicon.ico',
+    ]);
+    const AUTH_EXEMPT_PREFIX = [
+      '/api/webhooks/receive/',   // Inbound webhook receiver
+      '/assets/',                 // Static dashboard assets (JS/CSS)
+    ];
+
+    // Check if auth is enabled (default: enabled when GATEWAY_AUTH=true or on non-localhost)
+    const authEnabled = process.env['GATEWAY_AUTH'] !== 'false';
+
+    if (authEnabled) {
+      this.app.addHook('onRequest', async (request: FastifyRequest, reply: FastifyReply) => {
+        const path = request.url.split('?')[0];
+
+        // Skip auth for exempt paths
+        if (AUTH_EXEMPT_EXACT.has(path)) return;
+        if (AUTH_EXEMPT_PREFIX.some(prefix => path.startsWith(prefix))) return;
+
+        // Check JWT from cookie or Authorization header
+        const jwt = this.extractJWT(request);
+        if (jwt) {
+          try {
+            this.auth.verifyAccessToken(jwt);
+            return; // Valid session — allow through
+          } catch {
+            // Invalid/expired token — clear cookie and block
+            reply.header('Set-Cookie', 'forgeai_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0');
+          }
+        }
+
+        // Not authenticated — block
+        if (path.startsWith('/api/')) {
+          // API calls get 401 JSON
+          reply.status(401).send({ error: 'Authentication required', authUrl: '/auth/access' });
+        } else {
+          // Page requests get redirected to access page
+          reply.redirect('/auth/access');
+        }
+      });
+      logger.info('🔒 Authentication middleware enabled (access token system)');
+    } else {
+      logger.warn('⚠️ Authentication middleware DISABLED (GATEWAY_AUTH=false)');
+    }
+
     // Paths exempt from rate limiting (health checks, dashboard polling, static assets)
     const RATE_LIMIT_EXEMPT = new Set(['/health', '/info', '/api/providers', '/api/chat/sessions']);
     // Also exempt progress polling and static dashboard assets
@@ -611,43 +686,584 @@ export class Gateway {
   }
 
   private registerAuthRoutes(): void {
-    // Login
-    this.app.post('/api/auth/login', async (request: FastifyRequest, reply: FastifyReply) => {
-      const { username, password } = request.body as { username: string; password: string };
+    const PENDING_TTL = 5 * 60 * 1000; // 5 min for TOTP entry after token validation
 
-      if (!username || !password) {
-        reply.status(400).send({ error: 'Username and password required' });
+    // Cleanup expired pending sessions periodically
+    setInterval(() => {
+      const now = Date.now();
+      for (const [id, s] of this.pendingSessions) {
+        if (now - s.createdAt > PENDING_TTL) this.pendingSessions.delete(id);
+      }
+    }, 60_000);
+
+    // ─── Access Token Exchange: token → pending session → TOTP form ───
+    this.app.get('/auth/access', async (request: FastifyRequest, reply: FastifyReply) => {
+      const query = request.query as { token?: string };
+
+      if (!query.token) {
+        reply.header('Content-Type', 'text/html');
+        return reply.send(this.getAccessPageHTML());
+      }
+
+      // Validate the temporary access token
+      const result = this.accessTokenManager.validate(query.token, request.ip);
+      if (!result.valid) {
+        this.auditLogger.log({
+          action: 'auth.access_token_failed',
+          ipAddress: request.ip,
+          details: { reason: result.reason },
+          success: false,
+          riskLevel: 'high',
+        });
+        reply.header('Content-Type', 'text/html');
+        return reply.send(this.getAccessPageHTML(result.reason));
+      }
+
+      // Token valid — create pending session awaiting 2FA
+      const { randomBytes } = await import('node:crypto');
+      const pendingId = randomBytes(24).toString('base64url');
+      this.pendingSessions.set(pendingId, { createdAt: Date.now(), ip: request.ip });
+
+      this.auditLogger.log({
+        action: 'auth.access_token_used',
+        ipAddress: request.ip,
+        details: { pendingId, awaiting2FA: true },
+        success: true,
+        riskLevel: 'medium',
+      });
+
+      logger.info('Access token validated, awaiting 2FA', { ip: request.ip, pendingId });
+
+      // Check if 2FA is set up
+      const has2FA = this.vault.isInitialized() && this.vault.listKeys().includes('system:2fa_secret');
+
+      if (!has2FA) {
+        // First-time setup: generate secret + QR code (server-side data URI)
+        const setup = this.twoFactor.generateSetup('admin');
+        (this.pendingSessions.get(pendingId) as any).setupSecret = setup.secret;
+        const qrDataUri = await QRCode.toDataURL(setup.otpauthUrl, { width: 250, margin: 2 });
+        reply.header('Content-Type', 'text/html');
+        return reply.send(this.get2FASetupHTML(pendingId, setup.otpauthUrl, qrDataUri));
+      }
+
+      // 2FA already configured — show TOTP + PIN form
+      reply.header('Content-Type', 'text/html');
+      return reply.send(this.getTOTPFormHTML(pendingId));
+    });
+
+    // ─── First-time 2FA Setup: confirm TOTP code + Admin PIN + save secret ───
+    this.app.post('/auth/setup-2fa', async (request: FastifyRequest, reply: FastifyReply) => {
+      // Rate limit auth attempts (brute-force protection)
+      const clientIp = request.socket.remoteAddress || 'unknown';
+      if (this.isAuthRateLimited(clientIp)) {
+        reply.status(429).header('Content-Type', 'text/html');
+        return reply.send(this.getAccessPageHTML('Too many attempts. Please wait 1 minute.'));
+      }
+      this.recordAuthAttempt(clientIp);
+
+      const body = request.body as { pendingId?: string; code?: string; pin?: string };
+      if (!body.pendingId || !body.code) {
+        reply.status(400).header('Content-Type', 'text/html');
+        return reply.send(this.getAccessPageHTML('Missing pending session or code'));
+      }
+
+      const pending = this.pendingSessions.get(body.pendingId) as any;
+      if (!pending || Date.now() - pending.createdAt > PENDING_TTL) {
+        this.pendingSessions.delete(body.pendingId);
+        reply.header('Content-Type', 'text/html');
+        return reply.send(this.getAccessPageHTML('Session expired. Generate a new access token.'));
+      }
+
+      const setupSecret = pending.setupSecret;
+      if (!setupSecret) {
+        reply.header('Content-Type', 'text/html');
+        return reply.send(this.getAccessPageHTML('Invalid setup session'));
+      }
+
+      // Verify Admin PIN
+      const adminPin = process.env['FORGEAI_ADMIN_PIN'];
+      if (adminPin && body.pin?.trim() !== adminPin) {
+        this.auditLogger.log({
+          action: 'auth.2fa_failed',
+          ipAddress: request.ip,
+          details: { type: 'setup_bad_pin' },
+          success: false,
+          riskLevel: 'high',
+        });
+        const otpauthUrl = `otpauth://totp/ForgeAI:admin?secret=${setupSecret}&issuer=ForgeAI`;
+        const qrDataUri = await QRCode.toDataURL(otpauthUrl, { width: 250, margin: 2 });
+        reply.header('Content-Type', 'text/html');
+        return reply.send(this.get2FASetupHTML(body.pendingId, otpauthUrl, qrDataUri, 'Invalid Admin PIN.'));
+      }
+
+      // Verify the TOTP code against the setup secret
+      const isValid = this.twoFactor.verify(body.code.trim(), setupSecret);
+      if (!isValid) {
+        this.auditLogger.log({
+          action: 'auth.2fa_failed',
+          ipAddress: request.ip,
+          details: { type: 'setup_confirmation' },
+          success: false,
+          riskLevel: 'high',
+        });
+        const otpauthUrl = `otpauth://totp/ForgeAI:admin?secret=${setupSecret}&issuer=ForgeAI`;
+        const qrDataUri = await QRCode.toDataURL(otpauthUrl, { width: 250, margin: 2 });
+        reply.header('Content-Type', 'text/html');
+        return reply.send(this.get2FASetupHTML(body.pendingId, otpauthUrl, qrDataUri, 'Invalid TOTP code. Try again.'));
+      }
+
+      // Save 2FA secret to Vault permanently
+      if (this.vault.isInitialized()) {
+        this.vault.set('system:2fa_secret', setupSecret);
+        logger.info('2FA setup completed — secret saved to Vault');
+      }
+
+      this.auditLogger.log({
+        action: 'auth.2fa_verified',
+        ipAddress: request.ip,
+        details: { type: 'first_setup' },
+        success: true,
+        riskLevel: 'medium',
+      });
+
+      // Issue JWT
+      this.pendingSessions.delete(body.pendingId);
+      return this.issueJWTAndRedirect(reply, request.ip);
+    });
+
+    // ─── Verify TOTP code + Admin PIN (subsequent logins) ───
+    this.app.post('/auth/verify-totp', async (request: FastifyRequest, reply: FastifyReply) => {
+      // Rate limit auth attempts (brute-force protection)
+      const clientIp = request.socket.remoteAddress || 'unknown';
+      if (this.isAuthRateLimited(clientIp)) {
+        reply.status(429).header('Content-Type', 'text/html');
+        return reply.send(this.getAccessPageHTML('Too many attempts. Please wait 1 minute.'));
+      }
+      this.recordAuthAttempt(clientIp);
+
+      const body = request.body as { pendingId?: string; code?: string; pin?: string };
+      if (!body.pendingId || !body.code) {
+        reply.status(400).header('Content-Type', 'text/html');
+        return reply.send(this.getAccessPageHTML('Missing pending session or code'));
+      }
+
+      const pending = this.pendingSessions.get(body.pendingId);
+      if (!pending || Date.now() - pending.createdAt > PENDING_TTL) {
+        this.pendingSessions.delete(body.pendingId);
+        reply.header('Content-Type', 'text/html');
+        return reply.send(this.getAccessPageHTML('Session expired. Generate a new access token.'));
+      }
+
+      // Verify Admin PIN
+      const adminPin = process.env['FORGEAI_ADMIN_PIN'];
+      if (adminPin && body.pin?.trim() !== adminPin) {
+        this.auditLogger.log({
+          action: 'auth.2fa_failed',
+          ipAddress: request.ip,
+          details: { type: 'login_bad_pin' },
+          success: false,
+          riskLevel: 'high',
+        });
+        reply.header('Content-Type', 'text/html');
+        return reply.send(this.getTOTPFormHTML(body.pendingId, 'Invalid Admin PIN.'));
+      }
+
+      // Get 2FA secret from Vault
+      const secret = this.vault.isInitialized() ? this.vault.get('system:2fa_secret') : undefined;
+      if (!secret) {
+        reply.header('Content-Type', 'text/html');
+        return reply.send(this.getAccessPageHTML('2FA not configured. Contact admin.'));
+      }
+
+      const isValid = this.twoFactor.verify(body.code.trim(), secret);
+      if (!isValid) {
+        this.auditLogger.log({
+          action: 'auth.2fa_failed',
+          ipAddress: request.ip,
+          details: { type: 'login' },
+          success: false,
+          riskLevel: 'high',
+        });
+        reply.header('Content-Type', 'text/html');
+        return reply.send(this.getTOTPFormHTML(body.pendingId, 'Invalid TOTP code. Try again.'));
+      }
+
+      this.auditLogger.log({
+        action: 'auth.2fa_verified',
+        ipAddress: request.ip,
+        details: { type: 'login' },
+        success: true,
+        riskLevel: 'medium',
+      });
+
+      // Issue JWT
+      this.pendingSessions.delete(body.pendingId);
+      return this.issueJWTAndRedirect(reply, request.ip);
+    });
+
+    // ─── Generate Access Token (localhost/internal-only OR via Vault secret) ───
+    this.app.post('/api/auth/generate-access', async (request: FastifyRequest, reply: FastifyReply) => {
+      // SECURITY: Use raw TCP socket IP — immune to X-Forwarded-For spoofing
+      const socketIp = request.socket.remoteAddress || '';
+      const rawIp = socketIp.replace('::ffff:', '');
+      const isLocalhost = rawIp === '127.0.0.1' || socketIp === '::1' || socketIp === 'localhost'
+        || rawIp.startsWith('172.') || rawIp.startsWith('10.') || rawIp.startsWith('192.168.');
+
+      // Check for master secret in header (for remote generation via SSH tunnel)
+      const masterSecret = request.headers['x-forgeai-secret'] as string | undefined;
+      const storedSecret = this.vault.isInitialized() ? this.vault.get('system:master_secret') : undefined;
+      const hasValidSecret = masterSecret && storedSecret && masterSecret === storedSecret;
+
+      if (!isLocalhost && !hasValidSecret) {
+        this.auditLogger.log({
+          action: 'auth.generate_denied',
+          ipAddress: socketIp,
+          details: { reason: 'Non-localhost request without valid secret' },
+          success: false,
+          riskLevel: 'high',
+        });
+        reply.status(403).send({ error: 'Access token generation is only available from localhost' });
         return;
       }
 
-      // TODO: lookup user in DB, verify password
-      // For now, return a placeholder
+      const { token, expiresAt, expiresInSeconds } = this.accessTokenManager.generate();
+      const baseUrl = `http://${this.host === '0.0.0.0' ? request.hostname : this.host}:${this.port}`;
+      const accessUrl = `${baseUrl}/auth/access?token=${token}`;
+
       this.auditLogger.log({
-        action: 'auth.login',
-        ipAddress: request.ip,
-        details: { username },
+        action: 'auth.access_token_generated',
+        ipAddress: socketIp,
+        details: { expiresAt: expiresAt.toISOString(), expiresInSeconds },
+        success: true,
+        riskLevel: 'medium',
       });
 
-      reply.status(501).send({ error: 'Auth backend not yet connected to database' });
+      return {
+        accessUrl,
+        token,
+        expiresAt: expiresAt.toISOString(),
+        expiresInSeconds,
+      };
     });
 
-    // Verify token
+    // ─── Verify JWT ───
     this.app.get('/api/auth/verify', async (request: FastifyRequest, reply: FastifyReply) => {
-      const authHeader = request.headers.authorization;
-      if (!authHeader?.startsWith('Bearer ')) {
-        reply.status(401).send({ error: 'Missing authorization header' });
+      const jwt = this.extractJWT(request);
+      if (!jwt) {
+        reply.status(401).send({ error: 'Not authenticated' });
         return;
       }
 
       try {
-        const token = authHeader.slice(7);
-        const payload = this.auth.verifyAccessToken(token);
+        const payload = this.auth.verifyAccessToken(jwt);
         return { valid: true, user: payload };
       } catch {
-        reply.status(401).send({ error: 'Invalid or expired token' });
+        reply.status(401).send({ error: 'Invalid or expired session' });
         return;
       }
     });
+
+    // ─── Logout (revoke session) ───
+    this.app.post('/api/auth/logout', async (request: FastifyRequest, reply: FastifyReply) => {
+      const jwt = this.extractJWT(request);
+      if (jwt) {
+        try {
+          const payload = this.auth.verifyAccessToken(jwt);
+          this.auth.revokeToken(payload.jti);
+        } catch { /* token already invalid */ }
+      }
+
+      reply.header('Set-Cookie', 'forgeai_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0');
+      return { success: true };
+    });
+
+    // ─── Revoke all tokens (emergency) ───
+    this.app.post('/api/auth/revoke-all', async (request: FastifyRequest, reply: FastifyReply) => {
+      // SECURITY: Use raw TCP socket IP — immune to X-Forwarded-For spoofing
+      const socketIp = request.socket.remoteAddress || '';
+      const rIp = socketIp.replace('::ffff:', '');
+      const isLocalhost = rIp === '127.0.0.1' || socketIp === '::1' || socketIp === 'localhost'
+        || rIp.startsWith('172.') || rIp.startsWith('10.') || rIp.startsWith('192.168.');
+      if (!isLocalhost) {
+        reply.status(403).send({ error: 'Only available from localhost' });
+        return;
+      }
+
+      const count = this.accessTokenManager.revokeAll();
+      this.auditLogger.log({
+        action: 'auth.revoke_all',
+        ipAddress: socketIp,
+        details: { revokedCount: count },
+        riskLevel: 'critical',
+      });
+      return { success: true, revokedAccessTokens: count };
+    });
+  }
+
+  /**
+   * Issue JWT cookie and redirect to dashboard.
+   */
+  private issueJWTAndRedirect(reply: FastifyReply, ip: string): void {
+    const tokenPair = this.auth.generateTokenPair({
+      userId: 'admin',
+      username: 'admin',
+      role: UserRole.ADMIN,
+      sessionId: `access-${Date.now()}`,
+    });
+
+    reply.header('Set-Cookie',
+      `forgeai_session=${tokenPair.accessToken}; Path=/; HttpOnly; SameSite=Strict; Max-Age=86400`
+    );
+
+    logger.info('JWT session issued after 2FA', { ip, expiresAt: tokenPair.expiresAt.toISOString() });
+    reply.redirect('/dashboard');
+  }
+
+  /**
+   * TOTP verification form HTML (for subsequent logins).
+   */
+  private getTOTPFormHTML(pendingId: string, error?: string): string {
+    const errorBlock = error
+      ? `<div class="error">${this.escapeHtml(error)}</div>`
+      : '';
+
+    return `<!DOCTYPE html>
+<html lang="en"><head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ForgeAI — Two-Factor Authentication</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0a0a; color: #e0e0e0; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+    .container { max-width: 420px; width: 90%; text-align: center; background: #1a1a1a; border: 1px solid #333; border-radius: 16px; padding: 48px 36px; }
+    .logo { font-size: 48px; margin-bottom: 16px; }
+    h1 { font-size: 22px; font-weight: 700; margin-bottom: 8px; color: #fff; }
+    .subtitle { color: #888; font-size: 14px; margin-bottom: 28px; }
+    .error { background: #ff4444; color: white; padding: 10px 16px; border-radius: 8px; margin-bottom: 20px; font-size: 13px; }
+    form { display: flex; flex-direction: column; gap: 16px; }
+    input[type="text"] { background: #111; border: 1px solid #333; border-radius: 8px; padding: 14px 16px; color: #fff; font-size: 24px; text-align: center; letter-spacing: 8px; font-family: 'Fira Code', monospace; outline: none; }
+    input[type="text"]:focus { border-color: #ff6b35; }
+    button { background: #ff6b35; color: #fff; border: none; border-radius: 8px; padding: 14px; font-size: 15px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+    button:hover { background: #e55a2b; }
+    .footer { color: #555; font-size: 12px; margin-top: 24px; }
+  </style>
+</head><body>
+  <div class="container">
+    <div class="logo">🔐</div>
+    <h1>Two-Factor Authentication</h1>
+    <p class="subtitle">Enter the 6-digit code from your authenticator app</p>
+    ${errorBlock}
+    <form method="POST" action="/auth/verify-totp">
+      <input type="hidden" name="pendingId" value="${this.escapeHtml(pendingId)}">
+      <input type="text" name="code" maxlength="6" pattern="[0-9]{6}" required autofocus placeholder="000000" autocomplete="one-time-code">
+      <input type="password" name="pin" required placeholder="Admin PIN" style="background:#111;border:1px solid #333;border-radius:8px;padding:12px 16px;color:#fff;font-size:15px;text-align:center;outline:none;letter-spacing:2px;font-family:inherit;">
+      <button type="submit">Verify</button>
+    </form>
+    <p class="footer">Code refreshes every 30 seconds · Admin PIN required</p>
+  </div>
+</body></html>`;
+  }
+
+  /**
+   * 2FA first-time setup HTML (QR code + confirmation).
+   */
+  private get2FASetupHTML(pendingId: string, otpauthUrl: string, qrCodeUrl: string, error?: string): string {
+    const errorBlock = error
+      ? `<div class="error">${this.escapeHtml(error)}</div>`
+      : '';
+
+    // Extract secret from otpauth URL for manual entry
+    const secretMatch = otpauthUrl.match(/secret=([A-Z2-7]+)/i);
+    const secret = secretMatch ? secretMatch[1] : '';
+
+    return `<!DOCTYPE html>
+<html lang="en"><head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ForgeAI — Setup Two-Factor Authentication</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0a0a; color: #e0e0e0; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+    .container { max-width: 480px; width: 90%; text-align: center; background: #1a1a1a; border: 1px solid #333; border-radius: 16px; padding: 40px 32px; }
+    .logo { font-size: 48px; margin-bottom: 12px; }
+    h1 { font-size: 20px; font-weight: 700; margin-bottom: 6px; color: #fff; }
+    .subtitle { color: #888; font-size: 13px; margin-bottom: 24px; }
+    .error { background: #ff4444; color: white; padding: 10px 16px; border-radius: 8px; margin-bottom: 16px; font-size: 13px; }
+    .qr-section { background: #fff; border-radius: 12px; padding: 16px; display: inline-block; margin-bottom: 20px; }
+    .qr-section img { display: block; }
+    .manual-key { background: #111; border: 1px solid #2a2a2a; border-radius: 8px; padding: 12px; margin-bottom: 20px; }
+    .manual-key label { display: block; font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+    .manual-key code { font-family: 'Fira Code', monospace; font-size: 14px; color: #4ade80; letter-spacing: 2px; word-break: break-all; }
+    .steps { text-align: left; margin-bottom: 20px; }
+    .steps p { color: #999; font-size: 13px; margin-bottom: 6px; line-height: 1.5; }
+    .steps strong { color: #ccc; }
+    form { display: flex; flex-direction: column; gap: 14px; }
+    input[type="text"] { background: #111; border: 1px solid #333; border-radius: 8px; padding: 14px 16px; color: #fff; font-size: 24px; text-align: center; letter-spacing: 8px; font-family: 'Fira Code', monospace; outline: none; }
+    input[type="text"]:focus { border-color: #ff6b35; }
+    button { background: #ff6b35; color: #fff; border: none; border-radius: 8px; padding: 14px; font-size: 15px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+    button:hover { background: #e55a2b; }
+    .footer { color: #555; font-size: 11px; margin-top: 20px; }
+    hr { border: none; border-top: 1px solid #2a2a2a; margin: 16px 0; }
+  </style>
+</head><body>
+  <div class="container">
+    <div class="logo">🔐</div>
+    <h1>Setup Two-Factor Authentication</h1>
+    <p class="subtitle">Scan the QR code with Google Authenticator, Authy, or any TOTP app</p>
+    ${errorBlock}
+    <div class="qr-section">
+      <img src="${qrCodeUrl}" alt="QR Code" width="200" height="200">
+    </div>
+    <div class="manual-key">
+      <label>Manual entry key</label>
+      <code>${secret}</code>
+    </div>
+    <div class="steps">
+      <p><strong>1.</strong> Open your authenticator app</p>
+      <p><strong>2.</strong> Scan the QR code or enter the key manually</p>
+      <p><strong>3.</strong> Enter the 6-digit code below to confirm</p>
+    </div>
+    <hr>
+    <form method="POST" action="/auth/setup-2fa">
+      <input type="hidden" name="pendingId" value="${this.escapeHtml(pendingId)}">
+      <input type="text" name="code" maxlength="6" pattern="[0-9]{6}" required autofocus placeholder="000000" autocomplete="one-time-code">
+      <input type="password" name="pin" required placeholder="Admin PIN" style="background:#111;border:1px solid #333;border-radius:8px;padding:12px 16px;color:#fff;font-size:15px;text-align:center;outline:none;letter-spacing:2px;font-family:inherit;">
+      <button type="submit">Confirm & Activate 2FA</button>
+    </form>
+    <p class="footer">Save this key securely — Admin PIN is set via FORGEAI_ADMIN_PIN env var</p>
+  </div>
+</body></html>`;
+  }
+
+  /**
+   * HTML-escape a string to prevent XSS in rendered HTML.
+   */
+  private escapeHtml(str: string): string {
+    return str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  /**
+   * Check if an IP has exceeded the auth rate limit.
+   */
+  private isAuthRateLimited(ip: string): boolean {
+    const entry = this.authAttempts.get(ip);
+    if (!entry) return false;
+    if (Date.now() - entry.firstAttempt > Gateway.AUTH_RATE_WINDOW) {
+      this.authAttempts.delete(ip);
+      return false;
+    }
+    return entry.count >= Gateway.AUTH_RATE_LIMIT;
+  }
+
+  /**
+   * Record an auth attempt for rate limiting.
+   */
+  private recordAuthAttempt(ip: string): void {
+    const entry = this.authAttempts.get(ip);
+    if (!entry || Date.now() - entry.firstAttempt > Gateway.AUTH_RATE_WINDOW) {
+      this.authAttempts.set(ip, { count: 1, firstAttempt: Date.now() });
+    } else {
+      entry.count++;
+    }
+  }
+
+  /**
+   * Extract JWT from cookie or Authorization header.
+   */
+  private extractJWT(request: FastifyRequest): string | null {
+    let token: string | null = null;
+
+    // Check cookie first
+    const cookieHeader = request.headers.cookie;
+    if (cookieHeader) {
+      const match = cookieHeader.match(/forgeai_session=([^;]+)/);
+      if (match) token = match[1];
+    }
+
+    // Check Authorization header
+    if (!token) {
+      const authHeader = request.headers.authorization;
+      if (authHeader?.startsWith('Bearer ')) {
+        token = authHeader.slice(7);
+      }
+    }
+
+    // Validate token format: must be a valid JWT (3 base64url segments)
+    if (token && !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token)) {
+      return null; // Reject malformed tokens before they reach verifyAccessToken
+    }
+
+    return token;
+  }
+
+  /**
+   * Generate the access page HTML (shown when no token or invalid token).
+   */
+  private getAccessPageHTML(error?: string): string {
+    const errorBlock = error
+      ? `<div style="background:#ff4444;color:white;padding:12px 20px;border-radius:8px;margin-bottom:24px;font-size:14px;">⚠️ ${error}</div>`
+      : '';
+
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ForgeAI — Access Required</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0a0a0a; color: #e0e0e0; min-height: 100vh;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .container {
+      max-width: 520px; width: 90%; text-align: center;
+      background: #1a1a1a; border: 1px solid #333; border-radius: 16px;
+      padding: 48px 36px;
+    }
+    .logo { font-size: 48px; margin-bottom: 16px; }
+    h1 { font-size: 24px; font-weight: 700; margin-bottom: 8px; color: #fff; }
+    .subtitle { color: #888; font-size: 14px; margin-bottom: 32px; }
+    .instruction {
+      background: #111; border: 1px solid #2a2a2a; border-radius: 10px;
+      padding: 20px; text-align: left; margin-bottom: 24px;
+    }
+    .instruction h3 { font-size: 13px; color: #ff6b35; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
+    .code-block {
+      background: #000; border: 1px solid #333; border-radius: 6px;
+      padding: 12px 16px; font-family: 'Fira Code', monospace; font-size: 13px;
+      color: #4ade80; word-break: break-all; line-height: 1.6;
+      margin-top: 8px;
+    }
+    .step { color: #999; font-size: 13px; margin-bottom: 8px; line-height: 1.5; }
+    .step strong { color: #ccc; }
+    .divider { border: none; border-top: 1px solid #2a2a2a; margin: 24px 0; }
+    .footer { color: #555; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">🔥</div>
+    <h1>ForgeAI</h1>
+    <p class="subtitle">Dashboard access requires authentication</p>
+    ${errorBlock}
+    <div class="instruction">
+      <h3>How to access</h3>
+      <p class="step"><strong>1.</strong> Connect to your server via SSH</p>
+      <p class="step"><strong>2.</strong> Run the following command:</p>
+      <div class="code-block">curl -s -X POST http://127.0.0.1:${this.port}/api/auth/generate-access | jq</div>
+      <p class="step" style="margin-top:12px;"><strong>3.</strong> Open the <strong>accessUrl</strong> in your browser</p>
+      <p class="step"><strong>4.</strong> Your session will be valid for <strong>24 hours</strong></p>
+    </div>
+    <hr class="divider">
+    <p class="footer">Access tokens expire in 5 minutes · Sessions last 24h · IP lockout after 10 failed attempts</p>
+  </div>
+</body>
+</html>`;
   }
 
   private registerWSRoutes(): void {
@@ -821,7 +1437,18 @@ export class Gateway {
       await this.app.listen({ host: this.host, port: this.port });
       logger.info(`🔥 ${APP_NAME} Gateway running at http://${this.host}:${this.port}`);
       logger.info(`🔌 WebSocket available at ws://${this.host}:${this.port}/ws`);
-      logger.info(`🛡️  Security modules: RBAC ✓ | Vault ✓ | RateLimit ✓ | PromptGuard ✓ | AuditLog ✓ | 2FA ✓`);
+      logger.info(`🛡️  Security modules: RBAC ✓ | Vault ✓ | RateLimit ✓ | PromptGuard ✓ | AuditLog ✓ | AccessToken ✓`);
+
+      // Generate and print startup access URL
+      if (process.env['GATEWAY_AUTH'] !== 'false') {
+        const { token, expiresAt } = this.accessTokenManager.generate();
+        const displayHost = this.host === '0.0.0.0' ? '127.0.0.1' : this.host;
+        const accessUrl = `http://${displayHost}:${this.port}/auth/access?token=${token}`;
+        logger.info(`🔑 Dashboard access URL (valid 5 min):`);
+        logger.info(`   ${accessUrl}`);
+        logger.info(`   Expires at: ${expiresAt.toISOString()}`);
+        logger.info(`   Generate new: curl -s -X POST http://127.0.0.1:${this.port}/api/auth/generate-access`);
+      }
 
       // Schedule daily audit log rotation (every 24h, keep 90 days)
       const ROTATION_INTERVAL = 24 * 60 * 60 * 1000;

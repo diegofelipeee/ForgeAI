@@ -19,6 +19,7 @@ COPY packages/plugins/package.json packages/plugins/
 COPY packages/workflows/package.json packages/workflows/
 COPY packages/cli/package.json packages/cli/
 COPY packages/dashboard/package.json packages/dashboard/
+COPY packages/desktop/package.json packages/desktop/
 
 # Install dependencies
 RUN pnpm install --frozen-lockfile --ignore-scripts
@@ -68,6 +69,7 @@ COPY packages/plugins/package.json packages/plugins/
 COPY packages/workflows/package.json packages/workflows/
 COPY packages/cli/package.json packages/cli/
 COPY packages/dashboard/package.json packages/dashboard/
+COPY packages/desktop/package.json packages/desktop/
 
 # Install production dependencies only
 RUN pnpm install --frozen-lockfile --prod --ignore-scripts
@@ -98,4 +100,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD node -e "fetch('http://localhost:18800/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
 
 # Start gateway
-CMD ["node", "packages/cli/dist/index.js", "start"]
+CMD ["node", "packages/cli/dist/index.js", "start", "--migrate"]

@@ -1,44 +1,53 @@
 ## Description
 
-**ForgeCanvas** — Agent-driven visual artifact system. The agent can generate live, interactive visual content (HTML, React, SVG, Mermaid diagrams, Charts, Markdown, Code) rendered in sandboxed iframes inside the Dashboard. More powerful than OpenClaw's Canvas/A2UI: works in any browser (not just macOS), no custom protocol needed (LLM generates standard HTML/React), and supports bidirectional artifact↔agent communication via postMessage.
+Major release combining new features, security hardening, and CI/CD security pipeline. Highlights: **3-factor authentication** (access token + Admin PIN + TOTP), **critical localhost bypass fix**, **ForgeCanvas** artifact system, **Session Recording & Replay**, **Electron Desktop App** scaffold, **Browser Profiles** with file upload and DOM snapshots, **CronScheduler** proactive delivery, and a comprehensive **CI/CD Security Gate** to protect against malicious PRs.
 
 ## Type of Change
 
-- [ ] Bug fix
+- [x] Bug fix
 - [x] New feature
 - [ ] Refactor (no functional changes)
 - [x] Documentation
 - [ ] Tests
-- [ ] Security
+- [x] Security
 
 ## Changes Made
 
-- **`packages/shared/src/types/artifact.ts`** — NEW: Artifact types (ArtifactType, Artifact, CreateArtifactRequest, UpdateArtifactRequest, ArtifactEvent, ArtifactChartConfig)
-- **`packages/core/src/artifact/artifact-manager.ts`** — NEW: ArtifactManager with CRUD, file persistence (.forgeai/artifacts/), event system, and HTML renderers for 7 artifact types:
-  - HTML: Tailwind CDN + dark theme
-  - React: React 18 + Babel standalone + Tailwind
-  - SVG: inline rendering
-  - Mermaid: mermaid.js CDN with dark theme
-  - Chart: Chart.js CDN (bar, line, pie, area, scatter, radar)
-  - Markdown: marked.js + github-markdown-css dark
-  - Code: Prism.js with autoloader + copy button
-- **`packages/core/src/gateway/chat-routes.ts`** — 8 API endpoints: GET /api/artifacts, GET /api/artifacts/:id, GET /api/artifacts/:id/render, POST /api/artifacts, PUT /api/artifacts/:id, DELETE /api/artifacts/:id, POST /api/artifacts/:id/interact. WebSocket event broadcasting on create/update/delete.
-- **`packages/dashboard/src/components/ArtifactRenderer.tsx`** — NEW: Sandboxed iframe renderer with header (type badge, title, version), toolbar (copy source, view source, refresh, open in new tab, expand/minimize, delete), and postMessage listener for bidirectional interaction.
-- **`packages/dashboard/src/pages/Canvas.tsx`** — NEW: Dashboard page #18 with artifact creation form (7 type selector, title, content editor with placeholders, language picker for code), search/filter, WebSocket real-time updates, and artifact grid with ArtifactRenderer.
-- **`packages/dashboard/src/App.tsx`** — Route: /canvas
-- **`packages/dashboard/src/components/Layout.tsx`** — Sidebar: Canvas nav item with Layers icon
-- **`packages/dashboard/src/lib/i18n.ts`** — nav.canvas key for en/pt-br/es
-- **`README.md`** — 18 dashboard pages, Canvas description in dashboard table
+### 🔒 Security (Critical)
+
+- **3-Factor Authentication** — Access token (CLI-generated, 5min TTL) + Admin PIN (`FORGEAI_ADMIN_PIN` env var) + TOTP (Google Authenticator). All three required to access the dashboard.
+- **Localhost Bypass Fix** — Replaced `request.ip` (forged via `X-Forwarded-For`) with `request.socket.remoteAddress` (raw TCP, unforgeable). Set `trustProxy: false`.
+- **Gateway/MySQL bind 127.0.0.1** — Services only accessible via localhost or SSH tunnel by default.
+- **SSH Tunnel Helper** — `scripts/forge-tunnel.ps1` for secure remote dashboard access.
+- **CI/CD Security Gate** — 6-job pipeline: CodeQL, Gitleaks, backdoor pattern scanner, dependency audit, lockfile integrity, file safety checks.
+- **Gitleaks Config** — `.gitleaks.toml` with false positive reduction.
+- **PR Security Checklist** — Updated PR template with security-specific checklist.
+
+### ✨ Features
+
+- **ForgeCanvas** — Agent-driven visual artifact system (HTML, React, SVG, Mermaid, Charts, Markdown, Code) with sandboxed iframe rendering, 8 API endpoints, real-time WebSocket updates.
+- **Session Recording & Replay** — Record and replay agent sessions with full tool call history.
+- **Browser Profiles** — Puppeteer browser with file upload, DOM snapshots, anti-bot stealth.
+- **Electron Desktop App** — `packages/desktop` scaffold with system tray, global hotkeys, auto-update.
+- **CronScheduler Proactive Delivery** — Cron tasks now deliver results to user's active channel (Telegram/WhatsApp).
+- **Docker --migrate flag** — Auto table creation on container start.
+
+### 🐛 Fixes
+
+- Docker bridge IP detection for localhost-only auth endpoints.
+- System Chrome fallback for Puppeteer browser tool.
+- Canvas page layout padding consistency.
+- Dockerfile include desktop package + Chat/Recordings lint fixes.
 
 ## How to Test
 
-1. `pnpm -r build` — all packages build successfully
-2. `pnpm forge start --migrate`
-3. Dashboard → Canvas → "New Artifact" → select type → enter title + content → Create
-4. Test each type: HTML, React (counter app), SVG, Mermaid, Chart, Markdown, Code
-5. Expand/minimize, view source, copy, open in new tab, refresh, delete
-6. API: `POST /api/artifacts` with `{ sessionId: "test", type: "html", title: "Test", content: "<h1>Hello</h1>" }`
-7. `GET /api/artifacts/ART_ID/render` returns full HTML page for iframe
+1. `pnpm install && pnpm -r build` — all packages build
+2. `pnpm forge start --migrate` — start gateway
+3. **Auth flow**: `curl -X POST http://127.0.0.1:18800/api/auth/generate-access` → open URL → scan QR → enter TOTP + PIN
+4. **Exploit blocked**: `curl -X POST http://<VPS_IP>:18800/api/auth/generate-access -H "X-Forwarded-For: 127.0.0.1"` → returns 403
+5. **Canvas**: Dashboard → Canvas → New Artifact → test all 7 types
+6. **Recordings**: Dashboard → Recordings → view session recordings
+7. **Security Gate**: Open a PR to main → verify all 6 security jobs pass
 
 ## Checklist
 
@@ -48,20 +57,27 @@
 - [x] No secrets or API keys committed
 - [x] Documentation updated (if needed)
 
+## Security Checklist
+
+- [x] No `eval()` or `new Function()` usage
+- [x] No hardcoded credentials, IPs, or tokens
+- [x] No new `child_process` usage outside approved tool files
+- [x] No obfuscated or minified code committed to source
+- [x] Dependencies added are well-known and actively maintained
+- [x] `pnpm-lock.yaml` changes correspond to `package.json` changes
+- [x] No `.env` files or secrets in the PR
+
 ---
 
-### Files Changed (11 files, +953 lines)
+### Files Changed (43 files, +6216 lines)
 
-| File | Change |
-|:-----|:-------|
-| `packages/shared/src/types/artifact.ts` | **NEW** — Artifact types (+67 lines) |
-| `packages/shared/src/types/index.ts` | Export artifact types |
-| `packages/core/src/artifact/artifact-manager.ts` | **NEW** — ArtifactManager + 7 HTML renderers (+340 lines) |
-| `packages/core/src/index.ts` | Export ArtifactManager |
-| `packages/core/src/gateway/chat-routes.ts` | 8 API endpoints + init + WS events (+108 lines) |
-| `packages/dashboard/src/components/ArtifactRenderer.tsx` | **NEW** — Sandboxed iframe renderer (+135 lines) |
-| `packages/dashboard/src/pages/Canvas.tsx` | **NEW** — Canvas dashboard page (+265 lines) |
-| `packages/dashboard/src/App.tsx` | Route /canvas |
-| `packages/dashboard/src/components/Layout.tsx` | Sidebar Canvas entry |
-| `packages/dashboard/src/lib/i18n.ts` | nav.canvas i18n keys |
-| `README.md` | 18 pages, Canvas description |
+| Area | Files | Summary |
+|:-----|:------|:--------|
+| **Security** | `server.ts`, `access-token.ts`, `security.ts` | 3-factor auth, localhost bypass fix, access token system |
+| **CI/CD** | `security.yml`, `.gitleaks.toml`, `PR_TEMPLATE.md` | 6-job security gate pipeline |
+| **Canvas** | `artifact-manager.ts`, `ArtifactRenderer.tsx`, `Canvas.tsx`, `artifact.ts` | Full artifact system |
+| **Recording** | `session-recorder.ts`, `Recordings.tsx`, `recording.ts` | Session recording & replay |
+| **Desktop** | `packages/desktop/*` (6 files) | Electron app scaffold |
+| **Browser** | `puppeteer-browser.ts` | Profiles, file upload, DOM snapshots |
+| **Infra** | `docker-compose.yml`, `Dockerfile`, `forge-tunnel.ps1` | Docker fixes, SSH tunnel |
+| **Core** | `chat-routes.ts`, `cron-scheduler.ts`, `registry.ts` | Proactive delivery, tool wiring |

@@ -1,0 +1,415 @@
+name: Security Gate
+
+on:
+  pull_request:
+    branches: [main, dev]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: read
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  # ─── 1. Dependency Vulnerability Scanning ───────────────
+  dependency-audit:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Audit dependencies (critical + high)
+        run: pnpm audit --audit-level=high || true
+
+      - name: Check for known malicious packages
+        run: |
+          echo "🔍 Checking for known malicious packages..."
+          MALICIOUS_PACKAGES=(
+            "event-stream" "flatmap-stream" "ua-parser-js-hacked"
+            "colors-hack" "faker-hack" "node-ipc-hack"
+            "peacenotwar" "es5-ext-hack"
+          )
+          FOUND=0
+          for pkg in "${MALICIOUS_PACKAGES[@]}"; do
+            if grep -r "\"$pkg\"" pnpm-lock.yaml 2>/dev/null; then
+              echo "❌ MALICIOUS PACKAGE DETECTED: $pkg"
+              FOUND=1
+            fi
+          done
+          if [ $FOUND -eq 1 ]; then
+            echo "::error::Malicious packages detected in dependencies!"
+            exit 1
+          fi
+          echo "✅ No known malicious packages found"
+
+      - name: Check for suspicious postinstall scripts
+        run: |
+          echo "🔍 Checking for suspicious lifecycle scripts in dependencies..."
+          node -e "
+            const fs = require('fs');
+            const path = require('path');
+            const suspicious = [];
+            const nmDir = 'node_modules';
+
+            function checkPkg(dir) {
+              const pkgPath = path.join(dir, 'package.json');
+              if (!fs.existsSync(pkgPath)) return;
+              try {
+                const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+                const scripts = pkg.scripts || {};
+                const dangerous = ['postinstall', 'preinstall', 'install'];
+                for (const hook of dangerous) {
+                  if (scripts[hook]) {
+                    const cmd = scripts[hook];
+                    // Flag if script contains network calls, eval, or downloads
+                    if (/curl|wget|fetch|http|eval|exec|child_process|powershell|bash -c/.test(cmd)) {
+                      suspicious.push({ pkg: pkg.name, hook, cmd });
+                    }
+                  }
+                }
+              } catch {}
+            }
+
+            if (fs.existsSync(nmDir)) {
+              for (const entry of fs.readdirSync(nmDir)) {
+                const full = path.join(nmDir, entry);
+                if (entry.startsWith('@') && fs.statSync(full).isDirectory()) {
+                  for (const sub of fs.readdirSync(full)) {
+                    checkPkg(path.join(full, sub));
+                  }
+                } else {
+                  checkPkg(full);
+                }
+              }
+            }
+
+            if (suspicious.length > 0) {
+              console.log('⚠️  Suspicious lifecycle scripts found:');
+              suspicious.forEach(s => console.log('  ' + s.pkg + ' [' + s.hook + ']: ' + s.cmd));
+              // Warn but don't fail — some legit packages use postinstall
+              console.log('::warning::Suspicious lifecycle scripts detected. Manual review recommended.');
+            } else {
+              console.log('✅ No suspicious lifecycle scripts');
+            }
+          "
+
+  # ─── 2. Secret & Credential Leak Detection ─────────────
+  secret-scan:
+    name: Secret Leak Detection
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Gitleaks
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz | tar xz
+          chmod +x gitleaks
+
+      - name: Run Gitleaks
+        run: |
+          ./gitleaks detect --source . --config .gitleaks.toml --log-opts "${{ github.event.pull_request.base.sha }}..${{ github.sha }}" --verbose --exit-code 1
+
+  # ─── 3. Static Code Analysis (CodeQL) ──────────────────
+  codeql:
+    name: CodeQL Analysis
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ['javascript-typescript']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-and-quality
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
+
+  # ─── 4. Custom Backdoor Pattern Detection ──────────────
+  backdoor-scan:
+    name: Backdoor & Malicious Pattern Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get changed files (PR only)
+        id: changed
+        if: github.event_name == 'pull_request'
+        run: |
+          FILES=$(git diff --name-only --diff-filter=ACMR ${{ github.event.pull_request.base.sha }} ${{ github.sha }} -- '*.ts' '*.tsx' '*.js' '*.jsx' '*.mjs' '*.cjs' '*.json' || echo "")
+          echo "files<<EOF" >> $GITHUB_OUTPUT
+          echo "$FILES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Scan for dangerous patterns
+        run: |
+          echo "🔍 Scanning source code for backdoor patterns..."
+
+          # Determine which files to scan
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            FILES="${{ steps.changed.outputs.files }}"
+            if [ -z "$FILES" ]; then
+              echo "✅ No source files changed"
+              exit 0
+            fi
+            echo "Scanning $(echo "$FILES" | wc -l) changed files..."
+          else
+            FILES=$(find packages -name '*.ts' -o -name '*.tsx' -o -name '*.js' | grep -v node_modules | grep -v dist | grep -v '.d.ts')
+            echo "Scanning all source files..."
+          fi
+
+          VIOLATIONS=0
+          WARNINGS=0
+
+          # ── CRITICAL: Patterns that BLOCK the PR ──
+
+          # 1. eval() / Function() constructor (code injection)
+          echo ""
+          echo "── Checking: eval() / Function() injection ──"
+          EVAL_HITS=$(echo "$FILES" | xargs grep -Hn '\beval\s*(' 2>/dev/null | grep -v '// safe:' | grep -v 'node_modules' | grep -v '\.tsx' | grep -v '\.jsx' || true)
+          FUNC_HITS=$(echo "$FILES" | xargs grep -Hn 'new\s\+Function\s*(' 2>/dev/null | grep -v '// safe:' | grep -v 'node_modules' || true)
+          if [ -n "$EVAL_HITS" ]; then
+            echo "❌ eval() usage detected:"
+            echo "$EVAL_HITS"
+            VIOLATIONS=$((VIOLATIONS + 1))
+          fi
+          if [ -n "$FUNC_HITS" ]; then
+            echo "❌ new Function() usage detected:"
+            echo "$FUNC_HITS"
+            VIOLATIONS=$((VIOLATIONS + 1))
+          fi
+
+          # 2. Reverse shell patterns
+          echo ""
+          echo "── Checking: Reverse shell patterns ──"
+          REVSHELL=$(echo "$FILES" | xargs grep -HnE '(\/bin\/(ba)?sh|nc\s+-e|\bncat\b|\bsocat\b|\/dev\/tcp|mkfifo|telnet\s+\d)' 2>/dev/null | grep -v '// safe:' | grep -v node_modules | grep -v 'concat' | grep -v 'truncat' || true)
+          if [ -n "$REVSHELL" ]; then
+            echo "❌ Reverse shell pattern detected:"
+            echo "$REVSHELL"
+            VIOLATIONS=$((VIOLATIONS + 1))
+          fi
+
+          # 3. Crypto mining indicators
+          echo ""
+          echo "── Checking: Crypto mining indicators ──"
+          MINING=$(echo "$FILES" | xargs grep -HnEi '(stratum\+tcp|coinhive|cryptonight|xmrig|minergate|hashrate|nanopool|monero)' 2>/dev/null | grep -v node_modules || true)
+          if [ -n "$MINING" ]; then
+            echo "❌ Crypto mining pattern detected:"
+            echo "$MINING"
+            VIOLATIONS=$((VIOLATIONS + 1))
+          fi
+
+          # 4. Env exfiltration (process.env sent to external URL)
+          echo ""
+          echo "── Checking: Environment variable exfiltration ──"
+          EXFIL=$(echo "$FILES" | xargs grep -HnE '(fetch|axios|http\.request|https\.request|XMLHttpRequest)\s*\(.*process\.env' 2>/dev/null | grep -v node_modules | grep -v '\.test\.' | grep -v 'WEBHOOK_URL' | grep -v 'vault\.get' || true)
+          EXFIL2=$(echo "$FILES" | xargs grep -HnE 'process\.env.*fetch|process\.env.*axios' 2>/dev/null | grep -v node_modules | grep -v '\.test\.' | grep -v 'process\.env\[' | grep -v 'WEBHOOK_URL' | head -20 || true)
+          if [ -n "$EXFIL" ]; then
+            echo "❌ Possible env exfiltration detected:"
+            echo "$EXFIL"
+            VIOLATIONS=$((VIOLATIONS + 1))
+          fi
+
+          # 5. Obfuscated code (hex-encoded strings, base64 decode patterns)
+          echo ""
+          echo "── Checking: Obfuscated / encoded code ──"
+          OBFUSC=$(echo "$FILES" | xargs grep -HnE '(\\x[0-9a-fA-F]{2}){8,}' 2>/dev/null | grep -v node_modules || true)
+          B64EXEC=$(echo "$FILES" | xargs grep -HnE '(atob|Buffer\.from)\s*\(.*\)\s*.*\b(eval|exec|spawn|Function)\b' 2>/dev/null | grep -v node_modules || true)
+          if [ -n "$OBFUSC" ]; then
+            echo "❌ Heavy hex-encoded strings detected:"
+            echo "$OBFUSC"
+            VIOLATIONS=$((VIOLATIONS + 1))
+          fi
+          if [ -n "$B64EXEC" ]; then
+            echo "❌ Base64 decode + exec pattern detected:"
+            echo "$B64EXEC"
+            VIOLATIONS=$((VIOLATIONS + 1))
+          fi
+
+          # 6. Hardcoded IPs / suspicious outbound connections
+          echo ""
+          echo "── Checking: Hardcoded external IPs ──"
+          HARDCODED_IP=$(echo "$FILES" | xargs grep -HnE 'https?://[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' 2>/dev/null | grep -v node_modules | grep -v '127\.0\.0\.1' | grep -v '0\.0\.0\.0' | grep -v 'localhost' | grep -v '\.test\.' | grep -v '192\.168\.' | grep -v '10\.' | grep -v '172\.' || true)
+          if [ -n "$HARDCODED_IP" ]; then
+            echo "⚠️  Hardcoded external IPs found (review manually):"
+            echo "$HARDCODED_IP"
+            WARNINGS=$((WARNINGS + 1))
+          fi
+
+          # 7. Suspicious DNS / domain patterns
+          echo ""
+          echo "── Checking: Suspicious domains ──"
+          SUSP_DOMAINS=$(echo "$FILES" | xargs grep -HnEi '(ngrok\.io|requestbin|burpcollaborator|interact\.sh|oast\.|pipedream\.net|webhook\.site)' 2>/dev/null | grep -v node_modules || true)
+          if [ -n "$SUSP_DOMAINS" ]; then
+            echo "❌ Suspicious exfiltration domains detected:"
+            echo "$SUSP_DOMAINS"
+            VIOLATIONS=$((VIOLATIONS + 1))
+          fi
+
+          # ── WARNING: Patterns that warn but don't block ──
+
+          # 8. child_process usage (legitimate in tools, but flag for review)
+          echo ""
+          echo "── Checking: child_process usage ──"
+          CP_HITS=$(echo "$FILES" | xargs grep -Hn "child_process" 2>/dev/null | grep -v node_modules | grep -v 'shell-exec.ts' | grep -v 'code-runner.ts' | grep -v 'desktop-automation.ts' | grep -v 'chat-routes.ts' || true)
+          if [ -n "$CP_HITS" ]; then
+            echo "⚠️  child_process usage outside approved files:"
+            echo "$CP_HITS"
+            WARNINGS=$((WARNINGS + 1))
+          fi
+
+          # 9. Dynamic require/import with variables
+          echo ""
+          echo "── Checking: Dynamic imports ──"
+          DYN_IMPORT=$(echo "$FILES" | xargs grep -HnE '(require|import)\s*\(\s*[^"'"'"'`]' 2>/dev/null | grep -v node_modules | grep -v 'dist/' | grep -v '\.d\.ts' | head -20 || true)
+          if [ -n "$DYN_IMPORT" ]; then
+            echo "⚠️  Dynamic require/import detected (review manually):"
+            echo "$DYN_IMPORT"
+            WARNINGS=$((WARNINGS + 1))
+          fi
+
+          # ── Summary ──
+          echo ""
+          echo "═══════════════════════════════════════"
+          echo "  Security Scan Summary"
+          echo "═══════════════════════════════════════"
+          echo "  ❌ Critical violations: $VIOLATIONS"
+          echo "  ⚠️  Warnings: $WARNINGS"
+          echo "═══════════════════════════════════════"
+
+          if [ $VIOLATIONS -gt 0 ]; then
+            echo ""
+            echo "::error::$VIOLATIONS critical security violation(s) detected. PR blocked."
+            echo "If a pattern is a false positive, add '// safe: <reason>' comment to suppress."
+            exit 1
+          fi
+
+          if [ $WARNINGS -gt 0 ]; then
+            echo ""
+            echo "::warning::$WARNINGS warning(s) found. Manual review recommended."
+          fi
+
+          echo ""
+          echo "✅ No critical security violations detected"
+
+  # ─── 5. Lockfile Integrity ─────────────────────────────
+  lockfile-check:
+    name: Lockfile Integrity
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check lockfile tampering
+        run: |
+          echo "🔍 Checking lockfile integrity..."
+
+          # Check if lockfile was modified
+          LOCK_CHANGED=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }} -- pnpm-lock.yaml || echo "")
+
+          if [ -n "$LOCK_CHANGED" ]; then
+            echo "⚠️  pnpm-lock.yaml was modified in this PR"
+
+            # Check if package.json was also modified (expected if lockfile changes)
+            PKG_CHANGED=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }} -- '**/package.json' || echo "")
+
+            if [ -z "$PKG_CHANGED" ]; then
+              echo "::error::pnpm-lock.yaml was modified but NO package.json files changed. This is suspicious — lockfile should only change when dependencies change."
+              exit 1
+            fi
+
+            echo "✅ Lockfile change corresponds to package.json changes"
+
+            # Show what packages changed
+            echo ""
+            echo "Changed packages:"
+            echo "$PKG_CHANGED"
+          else
+            echo "✅ Lockfile unchanged"
+          fi
+
+  # ─── 6. File Permission & Executable Check ─────────────
+  file-safety:
+    name: File Safety Check
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for suspicious file types
+        run: |
+          echo "🔍 Checking for suspicious files in PR..."
+
+          CHANGED=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }} || echo "")
+          VIOLATIONS=0
+
+          # Block binary executables (allow known project scripts)
+          BINS=$(echo "$CHANGED" | grep -E '\.(exe|dll|so|dylib|bin|com|bat|cmd|ps1|sh|bash)$' | grep -v 'scripts/forge-tunnel.ps1' || true)
+          if [ -n "$BINS" ]; then
+            echo "❌ Executable/script files detected:"
+            echo "$BINS"
+            VIOLATIONS=$((VIOLATIONS + 1))
+          fi
+
+          # Block compiled/minified JS bundles (could hide malicious code)
+          MINIFIED=$(echo "$CHANGED" | grep -E '\.(min\.js|bundle\.js)$' | grep -v node_modules || true)
+          if [ -n "$MINIFIED" ]; then
+            echo "⚠️  Minified JS files detected (hard to review):"
+            echo "$MINIFIED"
+          fi
+
+          # Block .env files
+          ENV_FILES=$(echo "$CHANGED" | grep -E '\.env(\.|$)' | grep -v '.env.example' || true)
+          if [ -n "$ENV_FILES" ]; then
+            echo "❌ .env files detected in PR:"
+            echo "$ENV_FILES"
+            VIOLATIONS=$((VIOLATIONS + 1))
+          fi
+
+          if [ $VIOLATIONS -gt 0 ]; then
+            echo "::error::Suspicious files detected in PR. Review required."
+            exit 1
+          fi
+
+          echo "✅ No suspicious files detected"

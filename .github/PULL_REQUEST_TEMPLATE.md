@@ -40,3 +40,13 @@
 - [ ] Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/)
 - [ ] No secrets or API keys committed
 - [ ] Documentation updated (if needed)
+
+## Security Checklist
+
+- [ ] No `eval()` or `new Function()` usage
+- [ ] No hardcoded credentials, IPs, or tokens
+- [ ] No new `child_process` usage outside approved tool files
+- [ ] No obfuscated or minified code committed to source
+- [ ] Dependencies added are well-known and actively maintained
+- [ ] `pnpm-lock.yaml` changes correspond to `package.json` changes
+- [ ] No `.env` files or secrets in the PR
