@@ -3,6 +3,7 @@ import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 import multipart from '@fastify/multipart';
 import formbody from '@fastify/formbody';
+import QRCode from 'qrcode';
 import {
   createLogger,
   APP_NAME,
@@ -732,22 +733,22 @@ export class Gateway {
       const has2FA = this.vault.isInitialized() && this.vault.listKeys().includes('system:2fa_secret');
 
       if (!has2FA) {
-        // First-time setup: generate secret + QR code
+        // First-time setup: generate secret + QR code (server-side data URI)
         const setup = this.twoFactor.generateSetup('admin');
-        // Store secret temporarily in pending session for confirmation
         (this.pendingSessions.get(pendingId) as any).setupSecret = setup.secret;
+        const qrDataUri = await QRCode.toDataURL(setup.otpauthUrl, { width: 250, margin: 2 });
         reply.header('Content-Type', 'text/html');
-        return reply.send(this.get2FASetupHTML(pendingId, setup.otpauthUrl, setup.qrCodeUrl));
+        return reply.send(this.get2FASetupHTML(pendingId, setup.otpauthUrl, qrDataUri));
       }
 
-      // 2FA already configured — show TOTP form
+      // 2FA already configured — show TOTP + PIN form
       reply.header('Content-Type', 'text/html');
       return reply.send(this.getTOTPFormHTML(pendingId));
     });
 
-    // ─── First-time 2FA Setup: confirm TOTP code + save secret ───
+    // ─── First-time 2FA Setup: confirm TOTP code + Admin PIN + save secret ───
     this.app.post('/auth/setup-2fa', async (request: FastifyRequest, reply: FastifyReply) => {
-      const body = request.body as { pendingId?: string; code?: string };
+      const body = request.body as { pendingId?: string; code?: string; pin?: string };
       if (!body.pendingId || !body.code) {
         reply.status(400).header('Content-Type', 'text/html');
         return reply.send(this.getAccessPageHTML('Missing pending session or code'));
@@ -766,6 +767,22 @@ export class Gateway {
         return reply.send(this.getAccessPageHTML('Invalid setup session'));
       }
 
+      // Verify Admin PIN
+      const adminPin = process.env['FORGEAI_ADMIN_PIN'];
+      if (adminPin && body.pin?.trim() !== adminPin) {
+        this.auditLogger.log({
+          action: 'auth.2fa_failed',
+          ipAddress: request.ip,
+          details: { type: 'setup_bad_pin' },
+          success: false,
+          riskLevel: 'high',
+        });
+        const otpauthUrl = `otpauth://totp/ForgeAI:admin?secret=${setupSecret}&issuer=ForgeAI`;
+        const qrDataUri = await QRCode.toDataURL(otpauthUrl, { width: 250, margin: 2 });
+        reply.header('Content-Type', 'text/html');
+        return reply.send(this.get2FASetupHTML(body.pendingId, otpauthUrl, qrDataUri, 'Invalid Admin PIN.'));
+      }
+
       // Verify the TOTP code against the setup secret
       const isValid = this.twoFactor.verify(body.code.trim(), setupSecret);
       if (!isValid) {
@@ -776,11 +793,10 @@ export class Gateway {
           success: false,
           riskLevel: 'high',
         });
-        // Show setup page again with error (reuse same secret)
         const otpauthUrl = `otpauth://totp/ForgeAI:admin?secret=${setupSecret}&issuer=ForgeAI`;
-        const qrCodeUrl = `https://chart.googleapis.com/chart?chs=200x200&cht=qr&chl=${encodeURIComponent(otpauthUrl)}`;
+        const qrDataUri = await QRCode.toDataURL(otpauthUrl, { width: 250, margin: 2 });
         reply.header('Content-Type', 'text/html');
-        return reply.send(this.get2FASetupHTML(body.pendingId, otpauthUrl, qrCodeUrl, 'Invalid code. Try again.'));
+        return reply.send(this.get2FASetupHTML(body.pendingId, otpauthUrl, qrDataUri, 'Invalid TOTP code. Try again.'));
       }
 
       // Save 2FA secret to Vault permanently
@@ -802,9 +818,9 @@ export class Gateway {
       return this.issueJWTAndRedirect(reply, request.ip);
     });
 
-    // ─── Verify TOTP code (subsequent logins) ───
+    // ─── Verify TOTP code + Admin PIN (subsequent logins) ───
     this.app.post('/auth/verify-totp', async (request: FastifyRequest, reply: FastifyReply) => {
-      const body = request.body as { pendingId?: string; code?: string };
+      const body = request.body as { pendingId?: string; code?: string; pin?: string };
       if (!body.pendingId || !body.code) {
         reply.status(400).header('Content-Type', 'text/html');
         return reply.send(this.getAccessPageHTML('Missing pending session or code'));
@@ -815,6 +831,20 @@ export class Gateway {
         this.pendingSessions.delete(body.pendingId);
         reply.header('Content-Type', 'text/html');
         return reply.send(this.getAccessPageHTML('Session expired. Generate a new access token.'));
+      }
+
+      // Verify Admin PIN
+      const adminPin = process.env['FORGEAI_ADMIN_PIN'];
+      if (adminPin && body.pin?.trim() !== adminPin) {
+        this.auditLogger.log({
+          action: 'auth.2fa_failed',
+          ipAddress: request.ip,
+          details: { type: 'login_bad_pin' },
+          success: false,
+          riskLevel: 'high',
+        });
+        reply.header('Content-Type', 'text/html');
+        return reply.send(this.getTOTPFormHTML(body.pendingId, 'Invalid Admin PIN.'));
       }
 
       // Get 2FA secret from Vault
@@ -834,7 +864,7 @@ export class Gateway {
           riskLevel: 'high',
         });
         reply.header('Content-Type', 'text/html');
-        return reply.send(this.getTOTPFormHTML(body.pendingId, 'Invalid code. Try again.'));
+        return reply.send(this.getTOTPFormHTML(body.pendingId, 'Invalid TOTP code. Try again.'));
       }
 
       this.auditLogger.log({
@@ -1002,9 +1032,10 @@ export class Gateway {
     <form method="POST" action="/auth/verify-totp">
       <input type="hidden" name="pendingId" value="${pendingId}">
       <input type="text" name="code" maxlength="6" pattern="[0-9]{6}" required autofocus placeholder="000000" autocomplete="one-time-code">
+      <input type="password" name="pin" required placeholder="Admin PIN" style="background:#111;border:1px solid #333;border-radius:8px;padding:12px 16px;color:#fff;font-size:15px;text-align:center;outline:none;letter-spacing:2px;font-family:inherit;">
       <button type="submit">Verify</button>
     </form>
-    <p class="footer">Code refreshes every 30 seconds</p>
+    <p class="footer">Code refreshes every 30 seconds · Admin PIN required</p>
   </div>
 </body></html>`;
   }
@@ -1071,9 +1102,10 @@ export class Gateway {
     <form method="POST" action="/auth/setup-2fa">
       <input type="hidden" name="pendingId" value="${pendingId}">
       <input type="text" name="code" maxlength="6" pattern="[0-9]{6}" required autofocus placeholder="000000" autocomplete="one-time-code">
+      <input type="password" name="pin" required placeholder="Admin PIN" style="background:#111;border:1px solid #333;border-radius:8px;padding:12px 16px;color:#fff;font-size:15px;text-align:center;outline:none;letter-spacing:2px;font-family:inherit;">
       <button type="submit">Confirm & Activate 2FA</button>
     </form>
-    <p class="footer">Save this key securely — you'll need it if you lose your device</p>
+    <p class="footer">Save this key securely — Admin PIN is set via FORGEAI_ADMIN_PIN env var</p>
   </div>
 </body></html>`;
   }

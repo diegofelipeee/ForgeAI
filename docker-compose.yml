@@ -46,6 +46,7 @@ services:
       # Security
       VAULT_MASTER_PASSWORD: ${VAULT_MASTER_PASSWORD:-change-me-to-a-strong-password}
       JWT_SECRET: ${JWT_SECRET:-change-me-to-a-random-jwt-secret}
+      FORGEAI_ADMIN_PIN: ${FORGEAI_ADMIN_PIN:-}
       # LLM Providers
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
