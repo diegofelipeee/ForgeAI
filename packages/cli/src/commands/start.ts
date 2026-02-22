@@ -1,9 +1,52 @@
 import type { Command } from 'commander';
 import { resolve } from 'node:path';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { createGateway } from '@forgeai/core';
 import { initDatabase, runMigrations } from '@forgeai/core';
 import { MySQLAuditStore } from '@forgeai/core';
 import { APP_NAME } from '@forgeai/shared';
+
+const DEFAULT_SECRETS = ['change-me-to-a-random-jwt-secret', 'change-me-to-a-strong-password', 'change-me-to-a-random-secret'];
+
+function isDefaultOrEmpty(value: string | undefined): boolean {
+  return !value || DEFAULT_SECRETS.includes(value);
+}
+
+/** Auto-generate and persist secrets on first run so docker compose up "just works". */
+function resolveSecrets(forgeDir: string): { jwtSecret: string; vaultPassword: string } {
+  const secretsPath = resolve(forgeDir, 'generated-secrets.json');
+
+  // Try to load previously generated secrets
+  let saved: Record<string, string> = {};
+  if (existsSync(secretsPath)) {
+    try { saved = JSON.parse(readFileSync(secretsPath, 'utf-8')); } catch { /* ignore */ }
+  }
+
+  let jwtSecret = process.env['JWT_SECRET'];
+  let vaultPassword = process.env['VAULT_MASTER_PASSWORD'];
+  let generated = false;
+
+  if (isDefaultOrEmpty(jwtSecret)) {
+    jwtSecret = saved['jwtSecret'] ?? randomBytes(32).toString('hex');
+    generated = true;
+  }
+
+  if (isDefaultOrEmpty(vaultPassword)) {
+    vaultPassword = saved['vaultPassword'] ?? randomBytes(24).toString('base64url');
+    generated = true;
+  }
+
+  // Persist for next restart
+  if (generated && !existsSync(secretsPath)) {
+    if (!existsSync(forgeDir)) mkdirSync(forgeDir, { recursive: true });
+    writeFileSync(secretsPath, JSON.stringify({ jwtSecret, vaultPassword }, null, 2), { mode: 0o600 });
+    console.log('🔐 Security secrets auto-generated and saved to .forgeai/generated-secrets.json');
+    console.log('   To use your own secrets, set JWT_SECRET and VAULT_MASTER_PASSWORD in .env\n');
+  }
+
+  return { jwtSecret: jwtSecret!, vaultPassword: vaultPassword! };
+}
 
 export function registerStartCommand(program: Command): void {
   program
@@ -16,18 +59,8 @@ export function registerStartCommand(program: Command): void {
     .action(async (options: { host: string; port: string; migrate: boolean; verbose: boolean }) => {
       console.log(`\n🔥 Starting ${APP_NAME} Gateway...\n`);
 
-      const jwtSecret = process.env['JWT_SECRET'];
-      const vaultPassword = process.env['VAULT_MASTER_PASSWORD'];
-
-      if (!jwtSecret || jwtSecret === 'change-me-to-a-random-jwt-secret') {
-        console.error('❌ JWT_SECRET not set or still default. Set it in your .env file.');
-        process.exit(1);
-      }
-
-      if (!vaultPassword || vaultPassword === 'change-me-to-a-strong-password') {
-        console.error('❌ VAULT_MASTER_PASSWORD not set or still default. Set it in your .env file.');
-        process.exit(1);
-      }
+      const forgeDir = resolve(process.cwd(), '.forgeai');
+      const { jwtSecret, vaultPassword } = resolveSecrets(forgeDir);
 
       try {
         // Initialize database

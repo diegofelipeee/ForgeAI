@@ -1,4 +1,6 @@
-version: '3.8'
+# ForgeAI — docker compose up and you're running in 30 seconds.
+# No .env file needed! Security secrets are auto-generated on first run.
+# To add LLM keys or channels, use the Dashboard at http://localhost:18800/settings
 
 services:
   # ─── MySQL Database ────────────────────────────────
@@ -42,15 +44,14 @@ services:
       # Gateway
       GATEWAY_HOST: 0.0.0.0
       GATEWAY_PORT: 18800
-      GATEWAY_SECRET: ${GATEWAY_SECRET:-change-me-to-a-random-secret}
-      # Security
-      VAULT_MASTER_PASSWORD: ${VAULT_MASTER_PASSWORD:-change-me-to-a-strong-password}
-      JWT_SECRET: ${JWT_SECRET:-change-me-to-a-random-jwt-secret}
+      # Security — leave empty for auto-generation on first run
+      VAULT_MASTER_PASSWORD: ${VAULT_MASTER_PASSWORD:-}
+      JWT_SECRET: ${JWT_SECRET:-}
       FORGEAI_ADMIN_PIN: ${FORGEAI_ADMIN_PIN:-}
-      # LLM Providers
+      # LLM Providers (optional — configure via Dashboard)
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      # Channels (optional)
+      # Channels (optional — configure via Dashboard)
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:-}
       SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
