@@ -88,21 +88,29 @@ Plugin SDK for custom behaviors. MCP Client for external tool servers. Workflow 
 ## ⚡ Quick Start
 
 ```bash
-# Clone
 git clone https://github.com/forgeai-dev/ForgeAI.git
 cd ForgeAI
-
-# Install
-pnpm install
-
-# Interactive setup wizard (generates secrets, configures LLM, sets up channels)
-pnpm forge onboard
-
-# Start
-pnpm forge start
+docker compose up -d
 ```
 
-> **Prerequisites:** Node.js ≥ 22, pnpm ≥ 9, MySQL 8.x. See [full installation guide](#-installation) for Linux, macOS, Windows, and Docker.
+Open **http://localhost:18800** → add an LLM API key in Settings → start chatting.
+
+No `.env` file needed. Security secrets are auto-generated on first run.
+
+> **Want Telegram/WhatsApp?** Add your bot token in the Dashboard → Settings. See [**QUICKSTART.md**](./QUICKSTART.md) for the full guide.
+
+<details>
+<summary><strong>Without Docker (Node.js)</strong></summary>
+
+```bash
+pnpm install && pnpm -r build
+node packages/cli/dist/index.js onboard   # Interactive setup wizard
+node packages/cli/dist/index.js start --migrate
+```
+
+Prerequisites: Node.js ≥ 22, pnpm ≥ 9, MySQL 8.x
+
+</details>
 
 Gateway runs at `http://127.0.0.1:18800` — Dashboard included.
 
