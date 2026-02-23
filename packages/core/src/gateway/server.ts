@@ -69,6 +69,7 @@ export class Gateway {
   public readonly accessTokenManager: AccessTokenManager;
   public readonly twoFactor: TwoFactorAuth;
   public readonly emailOTP: EmailOTPService;
+  private readonly sensitiveRateLimiter: RateLimiter;
 
   // Localhost IPs for external detection
   private static readonly LOCALHOST_IPS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
@@ -101,6 +102,11 @@ export class Gateway {
     this.rateLimiter = createRateLimiter({
       windowMs: options.rateLimitWindowMs,
       maxRequests: options.rateLimitMaxRequests,
+    });
+    this.sensitiveRateLimiter = createRateLimiter({
+      windowMs: 60_000, // 1 minute window
+      maxRequests: 5,   // max 5 attempts per minute
+      keyPrefix: 'sensitive',
     });
     this.auditLogger = createAuditLogger();
     this.promptGuard = createPromptGuard();
@@ -1023,6 +1029,14 @@ export class Gateway {
     // ─── Verify Email OTP (external access 4th factor) ───
     this.app.post('/auth/verify-email', async (request: FastifyRequest, reply: FastifyReply) => {
       const clientIp = request.socket.remoteAddress || 'unknown';
+
+      // Rate limit: sensitive operations limiter (5 req/min per IP)
+      const rlResult = this.sensitiveRateLimiter.consume(`email-verify:${clientIp}`);
+      if (!rlResult.allowed) {
+        reply.status(429).header('Content-Type', 'text/html');
+        return reply.send(this.getAccessPageHTML('Too many attempts. Please wait 1 minute.'));
+      }
+
       if (this.isAuthRateLimited(clientIp)) {
         reply.status(429).header('Content-Type', 'text/html');
         return reply.send(this.getAccessPageHTML('Too many attempts. Please wait 1 minute.'));
@@ -1943,8 +1957,15 @@ document.getElementById('smtp-user').addEventListener('input', function() {
       return { success: true, configured: true };
     });
 
-    // POST /api/smtp/test — test SMTP connection
-    this.app.post('/api/smtp/test', async () => {
+    // POST /api/smtp/test — test SMTP connection (rate-limited: 5 req/min)
+    this.app.post('/api/smtp/test', async (request: FastifyRequest, reply: FastifyReply) => {
+      const clientIp = request.ip || 'unknown';
+      const rlResult = this.sensitiveRateLimiter.consume(`smtp-test:${clientIp}`);
+      if (!rlResult.allowed) {
+        reply.status(429);
+        return { ok: false, error: 'Too many test requests. Please wait 1 minute.' };
+      }
+
       if (!this.emailOTP.isConfigured()) {
         return { ok: false, error: 'SMTP not configured. Save settings first.' };
       }
@@ -2476,6 +2497,7 @@ document.getElementById('smtp-user').addEventListener('input', function() {
   async stop(): Promise<void> {
     logger.info('Shutting down Gateway...');
     this.rateLimiter.destroy();
+    this.sensitiveRateLimiter.destroy();
     this.auditLogger.destroy();
     this.vault.destroy();
     await this.app.close();
