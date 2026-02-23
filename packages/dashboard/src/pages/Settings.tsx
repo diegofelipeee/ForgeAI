@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Key, Database, Shield, Cpu, Save, Check, Loader2, Eye, EyeOff, Trash2, Image, AudioLines, AlertTriangle, Info, Wifi, RefreshCw, Copy, Terminal, Mic, MicOff, Radio } from 'lucide-react';
+import { Key, Database, Shield, Cpu, Save, Check, Loader2, Eye, EyeOff, Trash2, Image, AudioLines, AlertTriangle, Info, Wifi, RefreshCw, Copy, Terminal, Mic, MicOff, Radio, Mail } from 'lucide-react';
 import { api, type ProviderInfo } from '@/lib/api';
 import { useI18n, type Lang } from '@/lib/i18n';
 
@@ -71,6 +71,16 @@ export function SettingsPage() {
   // Node Protocol state
   const [nodeGenerating, setNodeGenerating] = useState(false);
 
+  // SMTP / Email OTP state
+  const [smtpConfig, setSMTPConfig] = useState<{ configured: boolean; host: string; port: string; user: string; from: string; adminEmail: string; hasPassword: boolean; source: string }>({ configured: false, host: '', port: '587', user: '', from: '', adminEmail: '', hasPassword: false, source: 'none' });
+  const [smtpFields, setSMTPFields] = useState<{ host: string; port: string; user: string; pass: string; from: string; adminEmail: string }>({ host: '', port: '587', user: '', pass: '', from: '', adminEmail: '' });
+  const [smtpSaving, setSMTPSaving] = useState(false);
+  const [smtpSaved, setSMTPSaved] = useState(false);
+  const [smtpError, setSMTPError] = useState('');
+  const [smtpTesting, setSMTPTesting] = useState(false);
+  const [smtpTestResult, setSMTPTestResult] = useState<{ ok: boolean; error?: string } | null>(null);
+  const [smtpShowPass, setSMTPShowPass] = useState(false);
+
   // Wake Word state
   const [wakeWordStatus, setWakeWordStatus] = useState<{ enabled: boolean; running: boolean; keyword: string; sensitivity: number; detectionCount: number; lastDetection?: string; uptime: number } | null>(null);
   const [wakeWordStarting, setWakeWordStarting] = useState(false);
@@ -87,7 +97,21 @@ export function SettingsPage() {
     fetch('/api/services').then(r => r.json()).then((d: { services: ServiceInfo[] }) => setServices(d.services ?? [])).catch(() => {});
   }, []);
 
-  useEffect(() => { loadProviders(); loadServices(); }, [loadProviders, loadServices]);
+  const loadSMTPConfig = useCallback(() => {
+    fetch('/api/smtp/config').then(r => r.json()).then((d: any) => {
+      setSMTPConfig(d);
+      setSMTPFields(f => ({
+        host: f.host || d.host || '',
+        port: f.port || d.port || '587',
+        user: f.user || d.user || '',
+        pass: f.pass || '',
+        from: f.from || d.from || '',
+        adminEmail: f.adminEmail || d.adminEmail || '',
+      }));
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => { loadProviders(); loadServices(); loadSMTPConfig(); }, [loadProviders, loadServices, loadSMTPConfig]);
 
   // Load wake word status
   const loadWakeWordStatus = useCallback(() => {
@@ -607,6 +631,136 @@ export function SettingsPage() {
             </div>
           );
         })()}
+      </section>
+
+      {/* Email OTP (SMTP) Configuration */}
+      <section className="space-y-4">
+        <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+          <Mail className="w-5 h-5 text-forge-400" />
+          Email OTP (External Security)
+        </h2>
+        <div className="rounded-xl border border-zinc-800 p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-white font-medium">SMTP Email Verification</p>
+              <p className="text-xs text-zinc-500">When accessing ForgeAI from the internet, an additional email verification code is required after TOTP + PIN.</p>
+            </div>
+            <span className={`text-xs px-2 py-0.5 rounded-full ${smtpConfig.configured ? 'bg-emerald-500/20 text-emerald-400' : 'bg-zinc-700 text-zinc-400'}`}>
+              {smtpConfig.configured ? `Active (${smtpConfig.source})` : 'Not configured'}
+            </span>
+          </div>
+
+          {smtpConfig.configured && (
+            <div className="flex items-start gap-2 p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+              <Shield className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0 mt-0.5" />
+              <p className="text-[10px] text-emerald-300/90 leading-relaxed">
+                <strong>4-Factor Auth Active:</strong> Access Token → TOTP Code → Admin PIN → Email OTP (external only). Local access skips email verification.
+              </p>
+            </div>
+          )}
+
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-zinc-400 mb-1 block">SMTP Host</label>
+                <input type="text" placeholder="smtp.gmail.com" value={smtpFields.host} onChange={e => setSMTPFields(f => ({ ...f, host: e.target.value }))}
+                  className="w-full bg-zinc-800/50 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-forge-500/50" />
+              </div>
+              <div>
+                <label className="text-xs text-zinc-400 mb-1 block">Port</label>
+                <input type="text" placeholder="587" value={smtpFields.port} onChange={e => setSMTPFields(f => ({ ...f, port: e.target.value }))}
+                  className="w-full bg-zinc-800/50 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-forge-500/50" />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs text-zinc-400 mb-1 block">SMTP Username (email)</label>
+              <input type="email" placeholder="your-email@gmail.com" value={smtpFields.user} onChange={e => setSMTPFields(f => ({ ...f, user: e.target.value }))}
+                className="w-full bg-zinc-800/50 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-forge-500/50" />
+            </div>
+
+            <div>
+              <label className="text-xs text-zinc-400 mb-1 block">SMTP Password {smtpConfig.hasPassword && <span className="text-emerald-400">(saved)</span>}</label>
+              <div className="relative">
+                <input type={smtpShowPass ? 'text' : 'password'} placeholder={smtpConfig.hasPassword ? '••••••••' : 'App Password (Gmail: 16 chars)'} value={smtpFields.pass} onChange={e => setSMTPFields(f => ({ ...f, pass: e.target.value }))}
+                  className="w-full bg-zinc-800/50 border border-zinc-700 rounded-lg px-3 py-2 pr-9 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-forge-500/50" />
+                <button aria-label="Toggle password" onClick={() => setSMTPShowPass(v => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300">
+                  {smtpShowPass ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs text-zinc-400 mb-1 block">From (display name)</label>
+              <input type="text" placeholder='ForgeAI <your-email@gmail.com>' value={smtpFields.from} onChange={e => setSMTPFields(f => ({ ...f, from: e.target.value }))}
+                className="w-full bg-zinc-800/50 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-forge-500/50" />
+            </div>
+
+            <div>
+              <label className="text-xs text-zinc-400 mb-1 block">Admin Email (receives OTP codes)</label>
+              <input type="email" placeholder="admin@example.com" value={smtpFields.adminEmail} onChange={e => setSMTPFields(f => ({ ...f, adminEmail: e.target.value }))}
+                className="w-full bg-zinc-800/50 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-forge-500/50" />
+            </div>
+          </div>
+
+          {smtpError && <p className="text-xs text-red-400 font-medium">{smtpError}</p>}
+          {smtpTestResult && (
+            <p className={`text-xs font-medium ${smtpTestResult.ok ? 'text-emerald-400' : 'text-red-400'}`}>
+              {smtpTestResult.ok ? 'SMTP connection test passed!' : `Test failed: ${smtpTestResult.error}`}
+            </p>
+          )}
+
+          <div className="flex gap-2">
+            <button onClick={async () => {
+              setSMTPSaving(true); setSMTPError(''); setSMTPTestResult(null);
+              try {
+                const res = await fetch('/api/smtp/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ host: smtpFields.host, port: Number(smtpFields.port) || 587, user: smtpFields.user, pass: smtpFields.pass || undefined, from: smtpFields.from || undefined, adminEmail: smtpFields.adminEmail || undefined }) });
+                const data = await res.json() as { error?: string };
+                if (data.error) { setSMTPError(data.error); } else { setSMTPSaved(true); setSMTPFields(f => ({ ...f, pass: '' })); setTimeout(() => setSMTPSaved(false), 2000); loadSMTPConfig(); }
+              } catch (err) { setSMTPError(err instanceof Error ? err.message : 'Failed'); }
+              setSMTPSaving(false);
+            }} disabled={smtpSaving || !smtpFields.host.trim() || !smtpFields.user.trim()}
+              className={`px-4 py-2 rounded-lg text-white text-xs font-medium transition-all ${smtpSaved ? 'bg-emerald-500' : smtpSaving ? 'bg-forge-500/50 cursor-wait' : smtpFields.host.trim() && smtpFields.user.trim() ? 'bg-forge-500 hover:bg-forge-600' : 'bg-zinc-700 cursor-not-allowed opacity-50'}`}>
+              {smtpSaved ? <><Check className="w-3.5 h-3.5 inline mr-1" />Saved</> : smtpSaving ? <><Loader2 className="w-3.5 h-3.5 inline mr-1 animate-spin" />Saving...</> : <><Save className="w-3.5 h-3.5 inline mr-1" />Save SMTP</>}
+            </button>
+
+            <button onClick={async () => {
+              setSMTPTesting(true); setSMTPTestResult(null);
+              try {
+                const res = await fetch('/api/smtp/test', { method: 'POST' });
+                const data = await res.json() as { ok: boolean; error?: string };
+                setSMTPTestResult(data);
+              } catch { setSMTPTestResult({ ok: false, error: 'Request failed' }); }
+              setSMTPTesting(false);
+            }} disabled={smtpTesting || !smtpConfig.configured}
+              className={`px-4 py-2 rounded-lg text-xs font-medium transition-all border ${
+                smtpConfig.configured
+                  ? 'border-forge-500/30 text-forge-400 hover:bg-forge-500/10'
+                  : 'border-zinc-700 text-zinc-500 cursor-not-allowed opacity-50'
+              }`}>
+              {smtpTesting ? <><Loader2 className="w-3.5 h-3.5 inline mr-1 animate-spin" />Testing...</> : 'Test Connection'}
+            </button>
+
+            {smtpConfig.configured && smtpConfig.source === 'vault' && (
+              <button onClick={async () => {
+                if (!confirm('Remove SMTP configuration from Vault?')) return;
+                await fetch('/api/smtp/config', { method: 'DELETE' });
+                setSMTPFields({ host: '', port: '587', user: '', pass: '', from: '', adminEmail: '' });
+                loadSMTPConfig();
+              }} className="px-3 py-2 rounded-lg text-red-400 hover:text-white hover:bg-red-500/80 border border-red-500/30 text-xs font-medium transition-all">
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-start gap-2 p-2.5 rounded-lg bg-zinc-800/50 border border-zinc-700/50">
+            <Info className="w-3.5 h-3.5 text-zinc-400 flex-shrink-0 mt-0.5" />
+            <p className="text-[10px] text-zinc-400 leading-relaxed">
+              <strong>Gmail users:</strong> Use an <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer" className="underline text-forge-400 hover:text-forge-300">App Password</a> (not your regular password). Enable 2-Step Verification in Google first, then generate an App Password for "Mail".
+              Settings are encrypted in the Vault.
+            </p>
+          </div>
+        </div>
       </section>
 
       {/* Image Generation */}

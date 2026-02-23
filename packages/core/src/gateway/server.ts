@@ -143,8 +143,12 @@ export class Gateway {
     this.registerSecuritySummaryRoutes();
     this.registerBackupRoutes();
     this.registerAuthRoutes();
+    this.registerSMTPRoutes();
     this.registerSecurityMiddleware();
     this.registerWSRoutes();
+
+    // Load SMTP config from Vault (overrides env vars if available)
+    this.loadSMTPFromVault();
 
     // Register chat + agent routes (pass vault for persistent key storage)
     await registerChatRoutes(this.app, this.vault);
@@ -1548,6 +1552,119 @@ export class Gateway {
       if (email) return email;
     }
     return process.env['ADMIN_EMAIL'] || null;
+  }
+
+  /**
+   * Load SMTP config from Vault on startup (overrides env vars).
+   */
+  private loadSMTPFromVault(): void {
+    if (!this.vault.isInitialized()) return;
+    const host = this.vault.get('system:smtp_host');
+    const user = this.vault.get('system:smtp_user');
+    const pass = this.vault.get('system:smtp_pass');
+    if (!host || !user || !pass) return;
+
+    const port = Number(this.vault.get('system:smtp_port')) || 587;
+    const from = this.vault.get('system:smtp_from') || `ForgeAI <${user}>`;
+
+    this.emailOTP.configure({ host, port, secure: port === 465, user, pass, from });
+    logger.info('📧 SMTP loaded from Vault — email OTP active');
+  }
+
+  /**
+   * SMTP configuration API routes (Dashboard UI).
+   */
+  private registerSMTPRoutes(): void {
+    // GET /api/smtp/config — current SMTP status
+    this.app.get('/api/smtp/config', async () => {
+      const vaultOk = this.vault.isInitialized();
+      const host = (vaultOk && this.vault.get('system:smtp_host')) || process.env['SMTP_HOST'] || '';
+      const port = (vaultOk && this.vault.get('system:smtp_port')) || process.env['SMTP_PORT'] || '587';
+      const user = (vaultOk && this.vault.get('system:smtp_user')) || process.env['SMTP_USER'] || '';
+      const from = (vaultOk && this.vault.get('system:smtp_from')) || process.env['SMTP_FROM'] || '';
+      const adminEmail = this.getAdminEmail() || '';
+      const hasPass = !!(vaultOk && this.vault.get('system:smtp_pass')) || !!process.env['SMTP_PASS'];
+
+      return {
+        configured: this.emailOTP.isConfigured(),
+        host,
+        port,
+        user,
+        from,
+        adminEmail,
+        hasPassword: hasPass,
+        source: vaultOk && this.vault.get('system:smtp_host') ? 'vault' : (process.env['SMTP_HOST'] ? 'env' : 'none'),
+      };
+    });
+
+    // POST /api/smtp/config — save SMTP config to Vault + hot-reload
+    this.app.post('/api/smtp/config', async (request: FastifyRequest) => {
+      const body = request.body as {
+        host?: string; port?: number; user?: string; pass?: string;
+        from?: string; adminEmail?: string;
+      };
+
+      if (!body.host || !body.user) {
+        return { error: 'SMTP host and user are required' };
+      }
+
+      if (!this.vault.isInitialized()) {
+        return { error: 'Vault not initialized' };
+      }
+
+      // Save to Vault
+      this.vault.set('system:smtp_host', body.host.trim());
+      this.vault.set('system:smtp_port', String(body.port || 587));
+      this.vault.set('system:smtp_user', body.user.trim());
+      if (body.pass) this.vault.set('system:smtp_pass', body.pass.trim());
+      if (body.from) this.vault.set('system:smtp_from', body.from.trim());
+      if (body.adminEmail) this.vault.set('system:admin_email', body.adminEmail.trim());
+
+      // Hot-reload SMTP
+      const pass = body.pass?.trim() || this.vault.get('system:smtp_pass') || '';
+      const port = body.port || 587;
+      this.emailOTP.configure({
+        host: body.host.trim(),
+        port,
+        secure: port === 465,
+        user: body.user.trim(),
+        pass,
+        from: body.from?.trim() || `ForgeAI <${body.user.trim()}>`,
+      });
+
+      logger.info('SMTP configured via Dashboard', { host: body.host, user: body.user });
+
+      this.auditLogger.log({
+        action: 'config.update',
+        ipAddress: 'dashboard',
+        details: { type: 'smtp_config', host: body.host },
+        success: true,
+        riskLevel: 'medium',
+      });
+
+      return { success: true, configured: true };
+    });
+
+    // POST /api/smtp/test — test SMTP connection
+    this.app.post('/api/smtp/test', async () => {
+      if (!this.emailOTP.isConfigured()) {
+        return { ok: false, error: 'SMTP not configured. Save settings first.' };
+      }
+      return this.emailOTP.testConnection();
+    });
+
+    // DELETE /api/smtp/config — remove SMTP config from Vault
+    this.app.delete('/api/smtp/config', async () => {
+      if (this.vault.isInitialized()) {
+        for (const key of ['system:smtp_host', 'system:smtp_port', 'system:smtp_user', 'system:smtp_pass', 'system:smtp_from', 'system:admin_email']) {
+          this.vault.delete(key);
+        }
+      }
+      // Re-init from env vars if available
+      this.emailOTP.configureFromEnv();
+      logger.info('SMTP config removed from Vault');
+      return { success: true, configured: this.emailOTP.isConfigured() };
+    });
   }
 
   /**
