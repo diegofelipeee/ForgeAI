@@ -293,12 +293,10 @@ export class Gateway {
       this.app.addHook('onRequest', async (request: FastifyRequest, reply: FastifyReply) => {
         const path = request.url.split('?')[0];
 
-        // Skip auth for exempt paths
-        if (AUTH_EXEMPT_EXACT.has(path)) return;
-        if (AUTH_EXEMPT_PREFIX.some(prefix => path.startsWith(prefix))) return;
-
-        // First-run: redirect to setup wizard (no auth needed yet)
-        if (this.isFirstRun() && !path.startsWith('/setup') && !path.startsWith('/api/setup')) {
+        // First-run: redirect EVERYTHING to setup wizard (except setup routes + static assets)
+        if (this.isFirstRun() && !path.startsWith('/setup') && !path.startsWith('/api/setup')
+            && !path.startsWith('/assets/') && !path.endsWith('.svg') && !path.endsWith('.ico')
+            && path !== '/health' && path !== '/info' && path !== '/manifest.json' && path !== '/sw.js') {
           if (path.startsWith('/api/')) {
             reply.status(503).send({ error: 'Initial setup required', setupUrl: '/setup' });
           } else {
@@ -306,6 +304,10 @@ export class Gateway {
           }
           return;
         }
+
+        // Skip auth for exempt paths
+        if (AUTH_EXEMPT_EXACT.has(path)) return;
+        if (AUTH_EXEMPT_PREFIX.some(prefix => path.startsWith(prefix))) return;
 
         // Smart mode: skip auth ONLY for true localhost connections
         // Both conditions must be true: server bound to loopback AND request from loopback
