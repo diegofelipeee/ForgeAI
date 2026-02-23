@@ -27,8 +27,10 @@ import {
   createVault,
   createAccessTokenManager,
   createTwoFactorAuth,
+  createEmailOTPService,
   type AccessTokenManager,
   type TwoFactorAuth,
+  type EmailOTPService,
   type JWTAuth,
   type RBACEngine,
   type RateLimiter,
@@ -66,9 +68,13 @@ export class Gateway {
   public readonly ipFilter: IPFilter;
   public readonly accessTokenManager: AccessTokenManager;
   public readonly twoFactor: TwoFactorAuth;
+  public readonly emailOTP: EmailOTPService;
+
+  // Localhost IPs for external detection
+  private static readonly LOCALHOST_IPS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 
   // Pending sessions: access token validated but 2FA not yet verified
-  private pendingSessions: Map<string, { createdAt: number; ip: string }> = new Map();
+  private pendingSessions: Map<string, { createdAt: number; ip: string; totpVerified?: boolean }> = new Map();
 
   // Rate limiter for auth endpoints (brute-force protection)
   private authAttempts: Map<string, { count: number; firstAttempt: number }> = new Map();
@@ -111,6 +117,12 @@ export class Gateway {
       lockoutDuration: 900,   // 15 minutes
     });
     this.twoFactor = createTwoFactorAuth('ForgeAI');
+    this.emailOTP = createEmailOTPService();
+
+    // Auto-configure SMTP from environment if available
+    if (this.emailOTP.configureFromEnv()) {
+      logger.info('📧 Email OTP configured — external logins will require email verification');
+    }
 
     logger.info('Gateway instance created');
   }
@@ -225,7 +237,7 @@ export class Gateway {
     const AUTH_EXEMPT_EXACT = new Set([
       '/health', '/info', '/auth/access',
       '/api/auth/generate-access', '/api/auth/verify',
-      '/auth/verify-totp', '/auth/setup-2fa',
+      '/auth/verify-totp', '/auth/setup-2fa', '/auth/verify-email', '/auth/change-pin',
       '/api/googlechat/webhook',
       '/manifest.json', '/sw.js', '/forge.svg', '/favicon.ico',
     ]);
@@ -246,18 +258,17 @@ export class Gateway {
     // 3. Smart mode only activates when binding to 127.0.0.1 (not 0.0.0.0)
     //    because 0.0.0.0 accepts connections from any interface
     // 4. trustProxy is OFF — Fastify uses raw socket IP, not headers
-    const LOCALHOST_IPS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
     const authSetting = process.env['GATEWAY_AUTH'];
 
     // Only enable smart bypass when binding to loopback interface specifically
     // 0.0.0.0 binds ALL interfaces (including external NICs) — NOT safe for open bypass
-    const isStrictlyLocalBinding = LOCALHOST_IPS.has(this.host);
+    const isStrictlyLocalBinding = Gateway.LOCALHOST_IPS.has(this.host);
 
     const isTrueLocalRequest = (request: FastifyRequest): boolean => {
       const socketIp = request.socket.remoteAddress || '';
 
       // Check 1: socket-level IP must be loopback
-      if (!LOCALHOST_IPS.has(socketIp)) return false;
+      if (!Gateway.LOCALHOST_IPS.has(socketIp)) return false;
 
       // Check 2: if proxy headers exist, someone is proxying — treat as external
       // A real local browser request (curl, Chrome on same machine) never sends these
@@ -825,8 +836,8 @@ export class Gateway {
         return reply.send(this.getAccessPageHTML('Invalid setup session'));
       }
 
-      // Verify Admin PIN
-      const adminPin = process.env['FORGEAI_ADMIN_PIN'];
+      // Verify Admin PIN (Vault custom PIN > env var fallback)
+      const adminPin = this.getAdminPin();
       if (adminPin && body.pin?.trim() !== adminPin) {
         this.auditLogger.log({
           action: 'auth.2fa_failed',
@@ -871,7 +882,28 @@ export class Gateway {
         riskLevel: 'medium',
       });
 
-      // Issue JWT
+      // ─── External access: require email OTP as additional factor ───
+      if (this.shouldRequireEmailOTP(request)) {
+        const adminEmail = this.getAdminEmail()!;
+        pending.totpVerified = true;
+
+        const sent = await this.emailOTP.sendOTP(body.pendingId, adminEmail);
+        if (!sent) {
+          reply.header('Content-Type', 'text/html');
+          return reply.send(this.getAccessPageHTML('Failed to send email verification. Check SMTP config.'));
+        }
+
+        reply.header('Content-Type', 'text/html');
+        return reply.send(this.getEmailOTPFormHTML(body.pendingId));
+      }
+
+      // ─── Local access or no email config: check if PIN change needed ───
+      if (this.isPinDefault()) {
+        pending.totpVerified = true;
+        reply.header('Content-Type', 'text/html');
+        return reply.send(this.getPinChangeHTML(body.pendingId));
+      }
+
       this.pendingSessions.delete(body.pendingId);
       return this.issueJWTAndRedirect(reply, request.ip);
     });
@@ -899,8 +931,8 @@ export class Gateway {
         return reply.send(this.getAccessPageHTML('Session expired. Generate a new access token.'));
       }
 
-      // Verify Admin PIN
-      const adminPin = process.env['FORGEAI_ADMIN_PIN'];
+      // Verify Admin PIN (Vault custom PIN > env var fallback)
+      const adminPin = this.getAdminPin();
       if (adminPin && body.pin?.trim() !== adminPin) {
         this.auditLogger.log({
           action: 'auth.2fa_failed',
@@ -941,7 +973,150 @@ export class Gateway {
         riskLevel: 'medium',
       });
 
-      // Issue JWT
+      // ─── External access: require email OTP as additional factor ───
+      if (this.shouldRequireEmailOTP(request)) {
+        const adminEmail = this.getAdminEmail()!;
+        const pending = this.pendingSessions.get(body.pendingId)!;
+        pending.totpVerified = true;
+
+        const sent = await this.emailOTP.sendOTP(body.pendingId, adminEmail);
+        if (!sent) {
+          reply.header('Content-Type', 'text/html');
+          return reply.send(this.getTOTPFormHTML(body.pendingId, 'Failed to send email verification. Check SMTP config.'));
+        }
+
+        logger.info('Email OTP sent for external login', { ip: request.ip, email: this.emailOTP['maskEmail'] ? '***' : adminEmail });
+        reply.header('Content-Type', 'text/html');
+        return reply.send(this.getEmailOTPFormHTML(body.pendingId));
+      }
+
+      // ─── Local access or no email config: check if PIN change needed, then issue JWT ───
+      if (this.isPinDefault()) {
+        const pending = this.pendingSessions.get(body.pendingId)!;
+        pending.totpVerified = true;
+        reply.header('Content-Type', 'text/html');
+        return reply.send(this.getPinChangeHTML(body.pendingId));
+      }
+
+      this.pendingSessions.delete(body.pendingId);
+      return this.issueJWTAndRedirect(reply, request.ip);
+    });
+
+    // ─── Verify Email OTP (external access 4th factor) ───
+    this.app.post('/auth/verify-email', async (request: FastifyRequest, reply: FastifyReply) => {
+      const clientIp = request.socket.remoteAddress || 'unknown';
+      if (this.isAuthRateLimited(clientIp)) {
+        reply.status(429).header('Content-Type', 'text/html');
+        return reply.send(this.getAccessPageHTML('Too many attempts. Please wait 1 minute.'));
+      }
+      this.recordAuthAttempt(clientIp);
+
+      const body = request.body as { pendingId?: string; emailCode?: string };
+      if (!body.pendingId || !body.emailCode) {
+        reply.status(400).header('Content-Type', 'text/html');
+        return reply.send(this.getAccessPageHTML('Missing session or email code'));
+      }
+
+      const pending = this.pendingSessions.get(body.pendingId);
+      if (!pending || Date.now() - pending.createdAt > PENDING_TTL) {
+        this.pendingSessions.delete(body.pendingId);
+        reply.header('Content-Type', 'text/html');
+        return reply.send(this.getAccessPageHTML('Session expired. Generate a new access token.'));
+      }
+
+      // Ensure TOTP was already verified for this session
+      if (!pending.totpVerified) {
+        reply.header('Content-Type', 'text/html');
+        return reply.send(this.getAccessPageHTML('Invalid session state. Please start over.'));
+      }
+
+      // Verify email OTP
+      const result = this.emailOTP.verify(body.pendingId, body.emailCode.trim());
+      if (!result.valid) {
+        this.auditLogger.log({
+          action: 'auth.email_otp_failed',
+          ipAddress: request.ip,
+          details: { reason: result.reason },
+          success: false,
+          riskLevel: 'high',
+        });
+        reply.header('Content-Type', 'text/html');
+        return reply.send(this.getEmailOTPFormHTML(body.pendingId, result.reason));
+      }
+
+      this.auditLogger.log({
+        action: 'auth.email_otp_verified',
+        ipAddress: request.ip,
+        details: { type: 'external_login' },
+        success: true,
+        riskLevel: 'medium',
+      });
+
+      // Check if PIN change is needed before issuing JWT
+      if (this.isPinDefault()) {
+        reply.header('Content-Type', 'text/html');
+        return reply.send(this.getPinChangeHTML(body.pendingId));
+      }
+
+      this.pendingSessions.delete(body.pendingId);
+      return this.issueJWTAndRedirect(reply, request.ip);
+    });
+
+    // ─── Force PIN Change (first login with default PIN) ───
+    this.app.post('/auth/change-pin', async (request: FastifyRequest, reply: FastifyReply) => {
+      const body = request.body as { pendingId?: string; newPin?: string; confirmPin?: string };
+      if (!body.pendingId || !body.newPin || !body.confirmPin) {
+        reply.status(400).header('Content-Type', 'text/html');
+        return reply.send(this.getAccessPageHTML('Missing required fields'));
+      }
+
+      const pending = this.pendingSessions.get(body.pendingId);
+      if (!pending || Date.now() - pending.createdAt > PENDING_TTL) {
+        this.pendingSessions.delete(body.pendingId);
+        reply.header('Content-Type', 'text/html');
+        return reply.send(this.getAccessPageHTML('Session expired. Generate a new access token.'));
+      }
+
+      if (!pending.totpVerified) {
+        reply.header('Content-Type', 'text/html');
+        return reply.send(this.getAccessPageHTML('Invalid session state. Please start over.'));
+      }
+
+      // Validate new PIN
+      const newPin = body.newPin.trim();
+      const confirmPin = body.confirmPin.trim();
+
+      if (newPin.length < 6) {
+        reply.header('Content-Type', 'text/html');
+        return reply.send(this.getPinChangeHTML(body.pendingId, 'PIN must be at least 6 characters.'));
+      }
+
+      if (newPin !== confirmPin) {
+        reply.header('Content-Type', 'text/html');
+        return reply.send(this.getPinChangeHTML(body.pendingId, 'PINs do not match.'));
+      }
+
+      // Don't allow keeping the same default PIN
+      const defaultPin = process.env['FORGEAI_ADMIN_PIN'];
+      if (defaultPin && newPin === defaultPin) {
+        reply.header('Content-Type', 'text/html');
+        return reply.send(this.getPinChangeHTML(body.pendingId, 'New PIN cannot be the same as the default PIN.'));
+      }
+
+      // Store new PIN in Vault (encrypted)
+      if (this.vault.isInitialized()) {
+        this.vault.set('system:admin_pin', newPin);
+        logger.info('Admin PIN changed and stored in Vault');
+
+        this.auditLogger.log({
+          action: 'auth.pin_changed',
+          ipAddress: request.ip,
+          details: { type: 'first_login_force_change' },
+          success: true,
+          riskLevel: 'medium',
+        });
+      }
+
       this.pendingSessions.delete(body.pendingId);
       return this.issueJWTAndRedirect(reply, request.ip);
     });
@@ -1114,6 +1289,99 @@ export class Gateway {
   }
 
   /**
+   * Email OTP verification form HTML (for external access).
+   */
+  private getEmailOTPFormHTML(pendingId: string, error?: string): string {
+    const errorBlock = error
+      ? `<div class="error">${this.escapeHtml(error)}</div>`
+      : '';
+
+    return `<!DOCTYPE html>
+<html lang="en"><head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ForgeAI — Email Verification</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0a0a; color: #e0e0e0; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+    .container { max-width: 420px; width: 90%; text-align: center; background: #1a1a1a; border: 1px solid #333; border-radius: 16px; padding: 48px 36px; }
+    .logo { font-size: 48px; margin-bottom: 16px; }
+    h1 { font-size: 22px; font-weight: 700; margin-bottom: 8px; color: #fff; }
+    .subtitle { color: #888; font-size: 14px; margin-bottom: 28px; line-height: 1.5; }
+    .error { background: #ff4444; color: white; padding: 10px 16px; border-radius: 8px; margin-bottom: 20px; font-size: 13px; }
+    .info { background: #1a3a2a; border: 1px solid #2a5a3a; color: #4ade80; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; font-size: 13px; }
+    form { display: flex; flex-direction: column; gap: 16px; }
+    input[type="text"] { background: #111; border: 1px solid #333; border-radius: 8px; padding: 14px 16px; color: #fff; font-size: 24px; text-align: center; letter-spacing: 8px; font-family: 'Fira Code', monospace; outline: none; }
+    input[type="text"]:focus { border-color: #4ade80; }
+    button { background: #4ade80; color: #000; border: none; border-radius: 8px; padding: 14px; font-size: 15px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+    button:hover { background: #22c55e; }
+    .footer { color: #555; font-size: 12px; margin-top: 24px; }
+    .badge { display: inline-block; background: #ff6b35; color: #fff; font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 4px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
+  </style>
+</head><body>
+  <div class="container">
+    <div class="logo">📧</div>
+    <span class="badge">External Access</span>
+    <h1>Email Verification</h1>
+    <p class="subtitle">A 6-digit verification code has been sent to your admin email</p>
+    ${errorBlock}
+    <div class="info">✅ TOTP + PIN verified · Email code required for external access</div>
+    <form method="POST" action="/auth/verify-email">
+      <input type="hidden" name="pendingId" value="${this.escapeHtml(pendingId)}">
+      <input type="text" name="emailCode" maxlength="6" pattern="[0-9]{6}" required autofocus placeholder="000000" autocomplete="one-time-code">
+      <button type="submit">Verify Email Code</button>
+    </form>
+    <p class="footer">Code expires in 5 minutes · Check your inbox and spam folder</p>
+  </div>
+</body></html>`;
+  }
+
+  /**
+   * PIN change form HTML (forced on first login with default PIN).
+   */
+  private getPinChangeHTML(pendingId: string, error?: string): string {
+    const errorBlock = error
+      ? `<div class="error">${this.escapeHtml(error)}</div>`
+      : '';
+
+    return `<!DOCTYPE html>
+<html lang="en"><head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ForgeAI — Change Admin PIN</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0a0a; color: #e0e0e0; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+    .container { max-width: 420px; width: 90%; text-align: center; background: #1a1a1a; border: 1px solid #333; border-radius: 16px; padding: 48px 36px; }
+    .logo { font-size: 48px; margin-bottom: 16px; }
+    h1 { font-size: 22px; font-weight: 700; margin-bottom: 8px; color: #fff; }
+    .subtitle { color: #888; font-size: 14px; margin-bottom: 28px; line-height: 1.5; }
+    .error { background: #ff4444; color: white; padding: 10px 16px; border-radius: 8px; margin-bottom: 20px; font-size: 13px; }
+    .warning { background: #3a2a1a; border: 1px solid #5a3a1a; color: #fbbf24; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; font-size: 13px; line-height: 1.5; }
+    form { display: flex; flex-direction: column; gap: 14px; }
+    input[type="password"] { background: #111; border: 1px solid #333; border-radius: 8px; padding: 14px 16px; color: #fff; font-size: 16px; text-align: center; letter-spacing: 2px; font-family: inherit; outline: none; }
+    input[type="password"]:focus { border-color: #fbbf24; }
+    button { background: #fbbf24; color: #000; border: none; border-radius: 8px; padding: 14px; font-size: 15px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+    button:hover { background: #f59e0b; }
+    .footer { color: #555; font-size: 12px; margin-top: 24px; }
+  </style>
+</head><body>
+  <div class="container">
+    <div class="logo">🔑</div>
+    <h1>Change Admin PIN</h1>
+    <p class="subtitle">Your admin PIN is still the default. You must change it before continuing.</p>
+    ${errorBlock}
+    <div class="warning">⚠️ Using a default PIN is a security risk. Choose a strong, unique PIN that you'll remember.</div>
+    <form method="POST" action="/auth/change-pin">
+      <input type="hidden" name="pendingId" value="${this.escapeHtml(pendingId)}">
+      <input type="password" name="newPin" required placeholder="New PIN (min 6 characters)" minlength="6">
+      <input type="password" name="confirmPin" required placeholder="Confirm new PIN" minlength="6">
+      <button type="submit">Set New PIN & Continue</button>
+    </form>
+    <p class="footer">PIN is encrypted and stored in the Vault · Min 6 characters</p>
+  </div>
+</body></html>`;
+  }
+
+  /**
    * 2FA first-time setup HTML (QR code + confirmation).
    */
   private get2FASetupHTML(pendingId: string, otpauthUrl: string, qrCodeUrl: string, error?: string): string {
@@ -1218,6 +1486,68 @@ export class Gateway {
     } else {
       entry.count++;
     }
+  }
+
+  /**
+   * Check if a request comes from an external (non-localhost) IP.
+   * Used to enforce email OTP for external access.
+   */
+  private isExternalRequest(request: FastifyRequest): boolean {
+    const socketIp = request.socket.remoteAddress || '';
+    if (!Gateway.LOCALHOST_IPS.has(socketIp)) return true;
+    // Docker internal IPs (172.x, 10.x) are treated as local (container-to-container)
+    const rawIp = socketIp.replace('::ffff:', '');
+    if (rawIp.startsWith('172.') || rawIp.startsWith('10.') || rawIp.startsWith('192.168.')) return false;
+    // Proxy headers mean external origin
+    const forwarded = request.headers['x-forwarded-for']
+      || request.headers['x-real-ip']
+      || request.headers['forwarded'];
+    if (forwarded) return true;
+    return false;
+  }
+
+  /**
+   * Get admin PIN — checks Vault (custom PIN) first, then env var fallback.
+   */
+  private getAdminPin(): string | null {
+    // Custom PIN stored in Vault takes priority (set during force-change)
+    if (this.vault.isInitialized()) {
+      const customPin = this.vault.get('system:admin_pin');
+      if (customPin) return customPin;
+    }
+    // Fallback to env var (default/initial PIN)
+    return process.env['FORGEAI_ADMIN_PIN'] || null;
+  }
+
+  /**
+   * Check if the admin PIN is still the default (env var) and needs to be changed.
+   */
+  private isPinDefault(): boolean {
+    if (!this.vault.isInitialized()) return false;
+    const customPin = this.vault.get('system:admin_pin');
+    return !customPin && !!process.env['FORGEAI_ADMIN_PIN'];
+  }
+
+  /**
+   * Determine if email OTP should be required for this request.
+   * Required when: external request + SMTP configured + admin email set.
+   */
+  private shouldRequireEmailOTP(request: FastifyRequest): boolean {
+    if (!this.emailOTP.isConfigured()) return false;
+    const adminEmail = this.getAdminEmail();
+    if (!adminEmail) return false;
+    return this.isExternalRequest(request);
+  }
+
+  /**
+   * Get admin email from Vault or env var.
+   */
+  private getAdminEmail(): string | null {
+    if (this.vault.isInitialized()) {
+      const email = this.vault.get('system:admin_email');
+      if (email) return email;
+    }
+    return process.env['ADMIN_EMAIL'] || null;
   }
 
   /**
