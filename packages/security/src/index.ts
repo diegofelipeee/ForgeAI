@@ -21,3 +21,5 @@ export { GDPRManager, createGDPRManager } from './gdpr.js';
 export type { GDPRUserData, GDPRDeleteResult } from './gdpr.js';
 export { AccessTokenManager, createAccessTokenManager } from './access-token.js';
 export type { AccessToken, AccessTokenConfig } from './access-token.js';
+export { EmailOTPService, createEmailOTPService } from './email-otp.js';
+export type { SMTPConfig, PendingEmailOTP } from './email-otp.js';

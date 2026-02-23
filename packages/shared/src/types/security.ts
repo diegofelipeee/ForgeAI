@@ -37,7 +37,11 @@ export type AuditAction =
   | 'auth.access_token_used'
   | 'auth.access_token_generated'
   | 'auth.generate_denied'
-  | 'auth.revoke_all';
+  | 'auth.revoke_all'
+  | 'auth.email_otp_sent'
+  | 'auth.email_otp_verified'
+  | 'auth.email_otp_failed'
+  | 'auth.pin_changed';
 
 export interface AuditLogEntry {
   id: string;
