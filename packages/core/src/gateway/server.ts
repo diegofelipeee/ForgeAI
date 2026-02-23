@@ -144,6 +144,7 @@ export class Gateway {
     this.registerBackupRoutes();
     this.registerAuthRoutes();
     this.registerSMTPRoutes();
+    this.registerSetupWizardRoutes();
     this.registerSecurityMiddleware();
     this.registerWSRoutes();
 
@@ -242,6 +243,7 @@ export class Gateway {
       '/health', '/info', '/auth/access',
       '/api/auth/generate-access', '/api/auth/verify',
       '/auth/verify-totp', '/auth/setup-2fa', '/auth/verify-email', '/auth/change-pin',
+      '/setup', '/api/setup/smtp', '/api/setup/init-2fa', '/api/setup/complete',
       '/api/googlechat/webhook',
       '/manifest.json', '/sw.js', '/forge.svg', '/favicon.ico',
     ]);
@@ -294,6 +296,16 @@ export class Gateway {
         // Skip auth for exempt paths
         if (AUTH_EXEMPT_EXACT.has(path)) return;
         if (AUTH_EXEMPT_PREFIX.some(prefix => path.startsWith(prefix))) return;
+
+        // First-run: redirect to setup wizard (no auth needed yet)
+        if (this.isFirstRun() && !path.startsWith('/setup') && !path.startsWith('/api/setup')) {
+          if (path.startsWith('/api/')) {
+            reply.status(503).send({ error: 'Initial setup required', setupUrl: '/setup' });
+          } else {
+            reply.redirect('/setup');
+          }
+          return;
+        }
 
         // Smart mode: skip auth ONLY for true localhost connections
         // Both conditions must be true: server bound to loopback AND request from loopback
@@ -1468,6 +1480,281 @@ export class Gateway {
   }
 
   /**
+   * First-run setup wizard HTML — multi-step guided setup.
+   */
+  private getSetupWizardHTML(): string {
+    return `<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ForgeAI — Initial Setup</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0a0a0a;color:#e0e0e0;min-height:100vh;display:flex;align-items:center;justify-content:center}
+.wizard{background:#111;border:1px solid #222;border-radius:20px;padding:40px;width:520px;max-width:95vw}
+.logo{font-size:48px;text-align:center;margin-bottom:8px}
+h1{text-align:center;font-size:22px;color:#fff;margin-bottom:4px}
+.subtitle{text-align:center;font-size:13px;color:#888;margin-bottom:28px}
+.steps-indicator{display:flex;justify-content:center;gap:8px;margin-bottom:28px}
+.step-dot{width:10px;height:10px;border-radius:50%;background:#333;transition:all .3s}
+.step-dot.active{background:#ff6b35;box-shadow:0 0 8px rgba(255,107,53,.4)}
+.step-dot.done{background:#22c55e}
+.step{display:none}
+.step.active{display:block}
+.step h2{font-size:17px;color:#fff;margin-bottom:6px}
+.step p.desc{font-size:12px;color:#888;margin-bottom:18px;line-height:1.5}
+label{display:block;font-size:12px;color:#999;margin-bottom:4px;margin-top:12px}
+input[type=text],input[type=email],input[type=password],input[type=number]{width:100%;background:#0a0a0a;border:1px solid #333;border-radius:8px;padding:10px 14px;color:#fff;font-size:14px;outline:none;transition:border .2s}
+input:focus{border-color:#ff6b35}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:10px 20px;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;transition:all .2s}
+.btn-primary{background:#ff6b35;color:#fff}.btn-primary:hover{background:#e55a28}
+.btn-primary:disabled{background:#555;cursor:not-allowed}
+.btn-secondary{background:transparent;color:#999;border:1px solid #333}.btn-secondary:hover{border-color:#555;color:#fff}
+.btn-test{background:transparent;border:1px solid #ff6b35;color:#ff6b35;font-size:12px;padding:8px 14px}.btn-test:hover{background:#ff6b35;color:#fff}
+.actions{display:flex;justify-content:space-between;align-items:center;margin-top:24px;padding-top:18px;border-top:1px solid #222}
+.msg{font-size:12px;padding:8px 12px;border-radius:8px;margin-top:12px;display:none}
+.msg.error{display:block;background:#2d1515;border:1px solid #5c2020;color:#f87171}
+.msg.success{display:block;background:#0f2918;border:1px solid #1a5c30;color:#4ade80}
+.msg.info{display:block;background:#1a1a2e;border:1px solid #2a2a5e;color:#818cf8}
+.qr-section{text-align:center;margin:16px 0}
+.qr-section img{border-radius:12px;background:#fff;padding:8px}
+.manual-key{text-align:center;margin:8px 0}
+.manual-key code{background:#1a1a1a;padding:6px 14px;border-radius:6px;font-size:13px;color:#ff6b35;letter-spacing:1px;user-select:all}
+.skip-link{font-size:11px;color:#666;cursor:pointer;text-decoration:underline}.skip-link:hover{color:#999}
+.feature-list{list-style:none;margin:12px 0}
+.feature-list li{padding:6px 0;font-size:13px;color:#ccc;display:flex;align-items:center;gap:8px}
+.feature-list li::before{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;background:#ff6b35;flex-shrink:0}
+.loading{display:inline-block;width:14px;height:14px;border:2px solid #555;border-top-color:#ff6b35;border-radius:50%;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.complete-icon{font-size:64px;text-align:center;margin:20px 0}
+</style>
+</head><body>
+<div class="wizard">
+  <div class="logo">&#x1F525;</div>
+  <h1>ForgeAI Setup</h1>
+  <p class="subtitle">Let's secure your instance in a few steps</p>
+  <div class="steps-indicator">
+    <div class="step-dot active" id="dot-0"></div>
+    <div class="step-dot" id="dot-1"></div>
+    <div class="step-dot" id="dot-2"></div>
+    <div class="step-dot" id="dot-3"></div>
+  </div>
+
+  <!-- Step 0: Welcome -->
+  <div class="step active" id="step-0">
+    <h2>Welcome to ForgeAI</h2>
+    <p class="desc">This wizard will configure your security settings. You'll set up:</p>
+    <ul class="feature-list">
+      <li>Email OTP — verification codes sent to your email for external access</li>
+      <li>Two-Factor Authentication — TOTP app (Google Authenticator, Authy)</li>
+      <li>Custom Admin PIN — replace the default PIN with your own secure PIN</li>
+    </ul>
+    <p class="desc" style="margin-top:16px;color:#ff6b35">After setup, accessing from the internet requires: Access Token + TOTP + PIN + Email OTP (4-factor auth).</p>
+    <div class="actions">
+      <div></div>
+      <button class="btn btn-primary" onclick="goStep(1)">Get Started &rarr;</button>
+    </div>
+  </div>
+
+  <!-- Step 1: SMTP Configuration -->
+  <div class="step" id="step-1">
+    <h2>Email Configuration (SMTP)</h2>
+    <p class="desc">Configure your email to receive security verification codes when accessing ForgeAI remotely.</p>
+    <div class="row">
+      <div><label>SMTP Host</label><input type="text" id="smtp-host" placeholder="smtp.gmail.com" value="smtp.gmail.com"></div>
+      <div><label>Port</label><input type="number" id="smtp-port" placeholder="587" value="587"></div>
+    </div>
+    <label>Email (SMTP username)</label>
+    <input type="email" id="smtp-user" placeholder="your-email@gmail.com">
+    <label>Password (App Password for Gmail)</label>
+    <input type="password" id="smtp-pass" placeholder="16-character app password">
+    <label>From (display name)</label>
+    <input type="text" id="smtp-from" placeholder="ForgeAI <your-email@gmail.com>">
+    <label>Admin Email (receives OTP codes)</label>
+    <input type="email" id="smtp-admin" placeholder="your-email@gmail.com">
+    <div id="smtp-msg" class="msg"></div>
+    <div style="margin-top:10px">
+      <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener" style="font-size:11px;color:#ff6b35">Gmail users: Get an App Password here &rarr;</a>
+    </div>
+    <div class="actions">
+      <button class="btn btn-secondary" onclick="goStep(0)">&larr; Back</button>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span class="skip-link" onclick="goStep(2)">Skip (configure later)</span>
+        <button class="btn btn-primary" id="smtp-save-btn" onclick="saveSMTP()">Save & Test</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 2: 2FA Setup -->
+  <div class="step" id="step-2">
+    <h2>Two-Factor Authentication</h2>
+    <p class="desc">Scan the QR code below with your authenticator app (Google Authenticator, Authy, etc.)</p>
+    <div class="qr-section" id="qr-container">
+      <div class="loading" style="width:24px;height:24px"></div>
+      <p style="font-size:12px;color:#666;margin-top:8px">Generating QR code...</p>
+    </div>
+    <div class="manual-key" id="manual-key-container" style="display:none">
+      <label style="margin:0">Manual entry key</label>
+      <code id="manual-key"></code>
+    </div>
+    <div id="tfa-msg" class="msg"></div>
+    <div class="actions">
+      <button class="btn btn-secondary" onclick="goStep(1)">&larr; Back</button>
+      <button class="btn btn-primary" onclick="goStep(3)">Next &rarr;</button>
+    </div>
+  </div>
+
+  <!-- Step 3: Verify TOTP + Set PIN -->
+  <div class="step" id="step-3">
+    <h2>Verify & Set Your PIN</h2>
+    <p class="desc">Enter the 6-digit code from your authenticator app and choose a custom admin PIN.</p>
+    <label>TOTP Code (from authenticator app)</label>
+    <input type="text" id="totp-code" maxlength="6" pattern="[0-9]{6}" placeholder="000000" autocomplete="one-time-code" style="text-align:center;font-size:20px;letter-spacing:6px">
+    <label>New Admin PIN (min 6 characters)</label>
+    <input type="password" id="new-pin" placeholder="Choose a secure PIN" style="letter-spacing:2px">
+    <label>Confirm PIN</label>
+    <input type="password" id="confirm-pin" placeholder="Repeat your PIN" style="letter-spacing:2px">
+    <div id="complete-msg" class="msg"></div>
+    <div class="actions">
+      <button class="btn btn-secondary" onclick="goStep(2)">&larr; Back</button>
+      <button class="btn btn-primary" id="complete-btn" onclick="completeSetup()">Complete Setup</button>
+    </div>
+  </div>
+
+  <!-- Step 4: Done -->
+  <div class="step" id="step-4">
+    <div class="complete-icon">&#x2705;</div>
+    <h2 style="text-align:center">Setup Complete!</h2>
+    <p class="desc" style="text-align:center">Your ForgeAI instance is now secured. Redirecting to dashboard...</p>
+    <div class="msg success" style="display:block;text-align:center">
+      4-Factor authentication is now active for external access.
+    </div>
+  </div>
+</div>
+
+<script>
+let currentStep = 0;
+let tfaInitialized = false;
+
+function goStep(n) {
+  document.getElementById('step-' + currentStep).classList.remove('active');
+  document.getElementById('step-' + n).classList.add('active');
+  // Update dots
+  for (let i = 0; i <= 3; i++) {
+    const dot = document.getElementById('dot-' + i);
+    dot.classList.remove('active', 'done');
+    if (i < n) dot.classList.add('done');
+    else if (i === n) dot.classList.add('active');
+  }
+  currentStep = n;
+  // Init 2FA when entering step 2
+  if (n === 2 && !tfaInitialized) init2FA();
+}
+
+async function saveSMTP() {
+  const btn = document.getElementById('smtp-save-btn');
+  const msg = document.getElementById('smtp-msg');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="loading"></span> Testing...';
+  msg.className = 'msg';
+  msg.style.display = 'none';
+
+  try {
+    const res = await fetch('/api/setup/smtp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        host: document.getElementById('smtp-host').value,
+        port: Number(document.getElementById('smtp-port').value) || 587,
+        user: document.getElementById('smtp-user').value,
+        pass: document.getElementById('smtp-pass').value,
+        from: document.getElementById('smtp-from').value,
+        adminEmail: document.getElementById('smtp-admin').value,
+      }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      msg.className = 'msg error'; msg.textContent = data.error; msg.style.display = 'block';
+    } else {
+      msg.className = 'msg success'; msg.textContent = data.message || 'SMTP saved!'; msg.style.display = 'block';
+      setTimeout(() => goStep(2), 1200);
+    }
+  } catch (e) {
+    msg.className = 'msg error'; msg.textContent = 'Request failed: ' + e.message; msg.style.display = 'block';
+  }
+  btn.disabled = false;
+  btn.textContent = 'Save & Test';
+}
+
+async function init2FA() {
+  const container = document.getElementById('qr-container');
+  const keyContainer = document.getElementById('manual-key-container');
+  const msg = document.getElementById('tfa-msg');
+  try {
+    const res = await fetch('/api/setup/init-2fa', { method: 'POST' });
+    const data = await res.json();
+    if (data.error) {
+      msg.className = 'msg error'; msg.textContent = data.error; msg.style.display = 'block';
+      return;
+    }
+    container.innerHTML = '<img src="' + data.qrCode + '" alt="QR Code" width="200" height="200">';
+    document.getElementById('manual-key').textContent = data.secret;
+    keyContainer.style.display = 'block';
+    tfaInitialized = true;
+  } catch (e) {
+    msg.className = 'msg error'; msg.textContent = 'Failed to generate QR: ' + e.message; msg.style.display = 'block';
+  }
+}
+
+async function completeSetup() {
+  const btn = document.getElementById('complete-btn');
+  const msg = document.getElementById('complete-msg');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="loading"></span> Verifying...';
+  msg.className = 'msg'; msg.style.display = 'none';
+
+  try {
+    const res = await fetch('/api/setup/complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        code: document.getElementById('totp-code').value.trim(),
+        newPin: document.getElementById('new-pin').value,
+        confirmPin: document.getElementById('confirm-pin').value,
+      }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      msg.className = 'msg error'; msg.textContent = data.error; msg.style.display = 'block';
+      btn.disabled = false; btn.textContent = 'Complete Setup';
+      return;
+    }
+    // Success — show step 4 and redirect
+    document.getElementById('step-3').classList.remove('active');
+    document.getElementById('step-4').classList.add('active');
+    for (let i = 0; i <= 3; i++) {
+      document.getElementById('dot-' + i).classList.remove('active');
+      document.getElementById('dot-' + i).classList.add('done');
+    }
+    setTimeout(() => { window.location.href = '/dashboard'; }, 2000);
+  } catch (e) {
+    msg.className = 'msg error'; msg.textContent = 'Request failed: ' + e.message; msg.style.display = 'block';
+    btn.disabled = false; btn.textContent = 'Complete Setup';
+  }
+}
+
+// Auto-fill admin email into "from" when user types email
+document.getElementById('smtp-user').addEventListener('input', function() {
+  const from = document.getElementById('smtp-from');
+  const admin = document.getElementById('smtp-admin');
+  if (!from.value || from.value.includes('{')) from.value = 'ForgeAI <' + this.value + '>';
+  if (!admin.value) admin.value = this.value;
+});
+</script>
+</body></html>`;
+  }
+
+  /**
    * Check if an IP has exceeded the auth rate limit.
    */
   private isAuthRateLimited(ip: string): boolean {
@@ -1530,6 +1817,15 @@ export class Gateway {
     if (!this.vault.isInitialized()) return false;
     const customPin = this.vault.get('system:admin_pin');
     return !customPin && !!process.env['FORGEAI_ADMIN_PIN'];
+  }
+
+  /**
+   * Check if this is the first run (no 2FA configured yet).
+   * Used to show the setup wizard instead of requiring auth.
+   */
+  private isFirstRun(): boolean {
+    if (!this.vault.isInitialized()) return true;
+    return !this.vault.listKeys().includes('system:2fa_secret');
   }
 
   /**
@@ -1664,6 +1960,163 @@ export class Gateway {
       this.emailOTP.configureFromEnv();
       logger.info('SMTP config removed from Vault');
       return { success: true, configured: this.emailOTP.isConfigured() };
+    });
+  }
+
+  /**
+   * First-run setup wizard — guides admin through SMTP, 2FA, and PIN setup.
+   * Only accessible when system:2fa_secret is not yet in Vault.
+   */
+  private registerSetupWizardRoutes(): void {
+    // Temporary storage for setup 2FA secret (not yet saved to Vault)
+    let pendingSetupSecret: string | null = null;
+
+    // GET /setup — serve the wizard HTML
+    this.app.get('/setup', async (_request: FastifyRequest, reply: FastifyReply) => {
+      if (!this.isFirstRun()) {
+        reply.redirect('/auth/access');
+        return;
+      }
+      reply.header('Content-Type', 'text/html');
+      return reply.send(this.getSetupWizardHTML());
+    });
+
+    // POST /api/setup/smtp — save SMTP config and test
+    this.app.post('/api/setup/smtp', async (request: FastifyRequest) => {
+      if (!this.isFirstRun()) return { error: 'Setup already completed' };
+
+      const body = request.body as {
+        host?: string; port?: number; user?: string; pass?: string;
+        from?: string; adminEmail?: string;
+      };
+
+      if (!body.host || !body.user || !body.pass) {
+        return { error: 'SMTP host, user, and password are required' };
+      }
+
+      if (!body.adminEmail) {
+        return { error: 'Admin email is required (this is where OTP codes will be sent)' };
+      }
+
+      if (!this.vault.isInitialized()) {
+        return { error: 'Vault not initialized. Check VAULT_MASTER_PASSWORD env var.' };
+      }
+
+      // Save to Vault
+      const port = body.port || 587;
+      this.vault.set('system:smtp_host', body.host.trim());
+      this.vault.set('system:smtp_port', String(port));
+      this.vault.set('system:smtp_user', body.user.trim());
+      this.vault.set('system:smtp_pass', body.pass.trim());
+      this.vault.set('system:smtp_from', body.from?.trim() || `ForgeAI <${body.user.trim()}>`);
+      this.vault.set('system:admin_email', body.adminEmail.trim());
+
+      // Hot-reload SMTP
+      this.emailOTP.configure({
+        host: body.host.trim(),
+        port,
+        secure: port === 465,
+        user: body.user.trim(),
+        pass: body.pass.trim(),
+        from: body.from?.trim() || `ForgeAI <${body.user.trim()}>`,
+      });
+
+      // Test connection
+      const test = await this.emailOTP.testConnection();
+      if (!test.ok) {
+        return { success: false, error: `SMTP connection failed: ${test.error}` };
+      }
+
+      logger.info('SMTP configured via setup wizard', { host: body.host });
+      return { success: true, message: 'SMTP configured and tested successfully!' };
+    });
+
+    // POST /api/setup/init-2fa — generate 2FA secret + QR code
+    this.app.post('/api/setup/init-2fa', async () => {
+      if (!this.isFirstRun()) return { error: 'Setup already completed' };
+
+      const setup = this.twoFactor.generateSetup('admin');
+      pendingSetupSecret = setup.secret;
+
+      const qrDataUri = await QRCode.toDataURL(setup.otpauthUrl, { width: 250, margin: 2 });
+
+      return {
+        qrCode: qrDataUri,
+        secret: setup.secret,
+        otpauthUrl: setup.otpauthUrl,
+      };
+    });
+
+    // POST /api/setup/complete — verify TOTP + save 2FA secret + set new PIN
+    this.app.post('/api/setup/complete', async (request: FastifyRequest, reply: FastifyReply) => {
+      if (!this.isFirstRun()) return { error: 'Setup already completed' };
+
+      const body = request.body as { code?: string; newPin?: string; confirmPin?: string };
+
+      if (!body.code || !body.newPin || !body.confirmPin) {
+        return { error: 'TOTP code, new PIN, and confirm PIN are all required' };
+      }
+
+      if (!pendingSetupSecret) {
+        return { error: 'No 2FA secret generated. Go back to Step 2.' };
+      }
+
+      if (!this.vault.isInitialized()) {
+        return { error: 'Vault not initialized' };
+      }
+
+      // Validate PIN
+      const newPin = body.newPin.trim();
+      const confirmPin = body.confirmPin.trim();
+
+      if (newPin.length < 6) {
+        return { error: 'PIN must be at least 6 characters.' };
+      }
+      if (newPin !== confirmPin) {
+        return { error: 'PINs do not match.' };
+      }
+
+      // Verify TOTP code
+      const isValid = this.twoFactor.verify(body.code.trim(), pendingSetupSecret);
+      if (!isValid) {
+        return { error: 'Invalid TOTP code. Make sure your authenticator app is synced.' };
+      }
+
+      // Save 2FA secret to Vault
+      this.vault.set('system:2fa_secret', pendingSetupSecret);
+      pendingSetupSecret = null;
+
+      // Save custom PIN to Vault
+      this.vault.set('system:admin_pin', newPin);
+
+      logger.info('First-run setup completed — 2FA + PIN configured');
+
+      this.auditLogger.log({
+        action: 'auth.2fa_verified',
+        ipAddress: request.ip,
+        details: { type: 'first_run_setup' },
+        success: true,
+        riskLevel: 'medium',
+      });
+
+      this.auditLogger.log({
+        action: 'auth.pin_changed',
+        ipAddress: request.ip,
+        details: { type: 'first_run_setup' },
+        success: true,
+        riskLevel: 'medium',
+      });
+
+      // Issue JWT session and return success (frontend will redirect)
+      const tokenPair = this.auth.generateTokenPair({
+        userId: 'admin',
+        username: 'admin',
+        role: UserRole.ADMIN,
+        sessionId: `setup-${Date.now()}`,
+      });
+      reply.header('Set-Cookie', `forgeai_session=${tokenPair.accessToken}; Path=/; HttpOnly; SameSite=Strict; Max-Age=86400`);
+
+      return { success: true, message: 'Setup complete! Redirecting to dashboard...' };
     });
   }
 
