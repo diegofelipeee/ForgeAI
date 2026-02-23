@@ -1738,7 +1738,7 @@ async function completeSetup() {
       document.getElementById('dot-' + i).classList.remove('active');
       document.getElementById('dot-' + i).classList.add('done');
     }
-    setTimeout(() => { window.location.href = '/dashboard'; }, 2000);
+    setTimeout(() => { window.location.href = '/'; }, 2000);
   } catch (e) {
     msg.className = 'msg error'; msg.textContent = 'Request failed: ' + e.message; msg.style.display = 'block';
     btn.disabled = false; btn.textContent = 'Complete Setup';
