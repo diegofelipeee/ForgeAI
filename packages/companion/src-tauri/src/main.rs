@@ -56,13 +56,16 @@ fn main() {
             // ─── System Tray ───
             let show = MenuItem::with_id(app, "show", "Show ForgeAI", true, None::<&str>)?;
             let hide = MenuItem::with_id(app, "hide", "Hide", true, None::<&str>)?;
+            let sep1 = MenuItem::with_id(app, "sep1", "───────────", false, None::<&str>)?;
+            let about = MenuItem::with_id(app, "about", "About ForgeAI Companion", true, None::<&str>)?;
+            let sep2 = MenuItem::with_id(app, "sep2", "───────────", false, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
 
-            let menu = Menu::with_items(app, &[&show, &hide, &quit])?;
+            let menu = Menu::with_items(app, &[&show, &hide, &sep1, &about, &sep2, &quit])?;
 
             let _tray = TrayIconBuilder::new()
                 .menu(&menu)
-                .tooltip("ForgeAI Companion")
+                .tooltip("ForgeAI Companion v1.0.0")
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "show" => {
                         if let Some(window) = app.get_webview_window("main") {
@@ -73,6 +76,13 @@ fn main() {
                     "hide" => {
                         if let Some(window) = app.get_webview_window("main") {
                             let _ = window.hide();
+                        }
+                    }
+                    "about" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                            let _ = window.eval("window.__showAbout && window.__showAbout()");
                         }
                     }
                     "quit" => {
