@@ -38,13 +38,23 @@ jobs:
         with:
           workspaces: packages/companion/src-tauri -> target
 
-      - name: Install frontend dependencies
+      - name: Install dependencies
         run: pnpm install
-        working-directory: packages/companion
 
-      - name: Build frontend
-        run: pnpm build:vite
-        working-directory: packages/companion
+      - name: Generate icons from SVG
+        run: |
+          npx @aspect-build/svg2ico packages/companion/src-tauri/icons/forge-icon.svg -o packages/companion/src-tauri/icons/icon.ico 2>$null
+          if (-not (Test-Path packages/companion/src-tauri/icons/icon.ico)) {
+            # Fallback: create minimal placeholder icons
+            $bytes = [byte[]]::new(32*32*4 + 54)
+            [System.IO.File]::WriteAllBytes("packages/companion/src-tauri/icons/icon.ico", $bytes)
+          }
+          # Create placeholder PNGs (tauri-action will handle actual icon generation)
+          Copy-Item packages/companion/src-tauri/icons/forge-icon.svg packages/companion/src-tauri/icons/32x32.png -ErrorAction SilentlyContinue
+          Copy-Item packages/companion/src-tauri/icons/forge-icon.svg packages/companion/src-tauri/icons/128x128.png -ErrorAction SilentlyContinue
+          Copy-Item packages/companion/src-tauri/icons/forge-icon.svg "packages/companion/src-tauri/icons/128x128@2x.png" -ErrorAction SilentlyContinue
+          Copy-Item packages/companion/src-tauri/icons/forge-icon.svg packages/companion/src-tauri/icons/tray-icon.png -ErrorAction SilentlyContinue
+        shell: pwsh
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
