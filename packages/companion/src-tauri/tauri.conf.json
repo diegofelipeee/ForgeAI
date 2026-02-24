@@ -51,8 +51,7 @@
       "nsis": {
         "displayLanguageSelector": false,
         "installerIcon": "icons/icon.ico",
-        "languages": ["English", "PortugueseBR"],
-        "shortDescription": "ForgeAI Desktop Companion"
+        "languages": ["English", "PortugueseBR"]
       }
     }
   }
