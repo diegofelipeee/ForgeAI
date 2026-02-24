@@ -54,35 +54,25 @@ fn main() {
         ])
         .setup(|app| {
             // ─── System Tray ───
-            let show = MenuItem::with_id(app, "show", "Show ForgeAI", true, None::<&str>)?;
-            let hide = MenuItem::with_id(app, "hide", "Hide", true, None::<&str>)?;
-            let sep1 = MenuItem::with_id(app, "sep1", "───────────", false, None::<&str>)?;
-            let about = MenuItem::with_id(app, "about", "About ForgeAI Companion", true, None::<&str>)?;
-            let sep2 = MenuItem::with_id(app, "sep2", "───────────", false, None::<&str>)?;
-            let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let toggle = MenuItem::with_id(app, "toggle", "Mostrar/ocultar janela", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "Sair", true, None::<&str>)?;
 
-            let menu = Menu::with_items(app, &[&show, &hide, &sep1, &about, &sep2, &quit])?;
+            let menu = Menu::with_items(app, &[&toggle, &quit])?;
 
             let _tray = TrayIconBuilder::new()
                 .menu(&menu)
-                .tooltip("ForgeAI Companion v1.0.0")
+                .show_menu_on_left_click(false)
+                .tooltip("ForgeAI Companion")
                 .on_menu_event(|app, event| match event.id.as_ref() {
-                    "show" => {
+                    "toggle" => {
                         if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
-                    }
-                    "hide" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.hide();
-                        }
-                    }
-                    "about" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                            let _ = window.eval("window.__showAbout && window.__showAbout()");
+                            if window.is_visible().unwrap_or(false) {
+                                let _ = window.hide();
+                            } else {
+                                let _ = window.show();
+                                let _ = window.unminimize();
+                                let _ = window.set_focus();
+                            }
                         }
                     }
                     "quit" => {
@@ -91,13 +81,14 @@ fn main() {
                     _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
-                    if let tauri::tray::TrayIconEvent::Click { .. } = event {
+                    if matches!(event, tauri::tray::TrayIconEvent::Click { .. }) {
                         let app = tray.app_handle();
                         if let Some(window) = app.get_webview_window("main") {
                             if window.is_visible().unwrap_or(false) {
                                 let _ = window.hide();
                             } else {
                                 let _ = window.show();
+                                let _ = window.unminimize();
                                 let _ = window.set_focus();
                             }
                         }

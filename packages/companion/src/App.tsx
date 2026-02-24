@@ -31,42 +31,34 @@ interface ChatMessage {
 
 type View = 'chat' | 'setup' | 'settings' | 'about';
 
+// ─── Drag helper ───
+const startDrag = (e: React.MouseEvent) => {
+  // Only drag on left mouse button, ignore if clicking a button
+  if (e.button !== 0) return;
+  if ((e.target as HTMLElement).closest('button')) return;
+  invoke('plugin:window|start_dragging', { label: 'main' }).catch(() => {});
+};
+
 // ─── Window Controls (close hides to tray) ───
 function WindowControls() {
-  const handleClose = async () => {
-    try {
-      const win = window.__TAURI__?.core;
-      if (win) await win.invoke('plugin:window|hide', { label: 'main' }).catch(() => {});
-    } catch {}
-    // Fallback: use Tauri window API
-    try {
-      const { getCurrentWindow } = await import('@tauri-apps/api/window');
-      await getCurrentWindow().hide();
-    } catch {}
-  };
-
-  const handleMinimize = async () => {
-    try {
-      const { getCurrentWindow } = await import('@tauri-apps/api/window');
-      await getCurrentWindow().minimize();
-    } catch {}
-  };
+  const handleClose = () => invoke('plugin:window|hide', { label: 'main' }).catch(() => {});
+  const handleMinimize = () => invoke('plugin:window|minimize', { label: 'main' }).catch(() => {});
 
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-0.5">
       <button
         onClick={handleMinimize}
-        className="w-6 h-6 rounded-md flex items-center justify-center text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-all"
+        className="w-7 h-7 rounded flex items-center justify-center text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700/50 transition-colors"
         title="Minimize"
       >
-        <Minus className="w-3 h-3" />
+        <Minus className="w-3.5 h-3.5" />
       </button>
       <button
         onClick={handleClose}
-        className="w-6 h-6 rounded-md flex items-center justify-center text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-all"
+        className="w-7 h-7 rounded flex items-center justify-center text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
         title="Close to tray"
       >
-        <X className="w-3 h-3" />
+        <X className="w-3.5 h-3.5" />
       </button>
     </div>
   );
@@ -181,9 +173,9 @@ export default function App() {
   // ─── About View ───
   if (view === 'about') {
     return (
-      <div className="w-[380px] h-[520px] bg-zinc-950 rounded-2xl border border-zinc-800 flex flex-col overflow-hidden">
-        <div data-tauri-drag-region className="h-10 flex items-center justify-between px-4 border-b border-zinc-800/50 shrink-0">
-          <span className="text-[11px] text-zinc-500 font-medium select-none">About</span>
+      <div className="w-full h-full bg-zinc-950 flex flex-col overflow-hidden">
+        <div onMouseDown={startDrag} className="h-10 flex items-center justify-between px-4 border-b border-zinc-800/50 shrink-0 cursor-grab active:cursor-grabbing">
+          <span className="text-[11px] text-zinc-500 font-medium select-none pointer-events-none">About</span>
           <WindowControls />
         </div>
         <div className="flex-1 flex flex-col items-center justify-center px-8 text-center">
@@ -221,9 +213,9 @@ export default function App() {
   // ─── Setup View ───
   if (view === 'setup') {
     return (
-      <div className="w-[380px] h-[520px] bg-zinc-950 rounded-2xl border border-zinc-800 flex flex-col overflow-hidden">
+      <div className="w-full h-full bg-zinc-950 flex flex-col overflow-hidden">
         {/* Title bar / drag region */}
-        <div data-tauri-drag-region className="h-10 flex items-center justify-between px-4 border-b border-zinc-800/50 shrink-0">
+        <div onMouseDown={startDrag} className="h-10 flex items-center justify-between px-4 border-b border-zinc-800/50 shrink-0 cursor-grab active:cursor-grabbing">
           <div className="flex items-center gap-2 select-none pointer-events-none">
             <div className="w-5 h-5 rounded bg-gradient-to-br from-orange-500 to-orange-700 flex items-center justify-center">
               <Flame className="w-3 h-3 text-white" />
@@ -304,9 +296,9 @@ export default function App() {
 
   // ─── Chat View ───
   return (
-    <div className="w-[380px] h-[520px] bg-zinc-950 rounded-2xl border border-zinc-800 flex flex-col overflow-hidden">
+    <div className="w-full h-full bg-zinc-950 flex flex-col overflow-hidden">
       {/* Header / drag region */}
-      <div data-tauri-drag-region className="h-12 flex items-center justify-between px-3 border-b border-zinc-800/50 shrink-0">
+      <div onMouseDown={startDrag} className="h-12 flex items-center justify-between px-3 border-b border-zinc-800/50 shrink-0 cursor-grab active:cursor-grabbing">
         <div className="flex items-center gap-2.5 pointer-events-none select-none">
           <div className="relative">
             <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-orange-500 to-orange-700 flex items-center justify-center">
