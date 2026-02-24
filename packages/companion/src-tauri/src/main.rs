@@ -40,6 +40,7 @@ fn main() {
             commands::check_safety,
             commands::get_safety_prompt,
             commands::get_status,
+            commands::pair_with_gateway,
             commands::disconnect,
             commands::get_system_info,
             commands::wake_word_start,

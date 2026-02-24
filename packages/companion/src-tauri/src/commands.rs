@@ -71,6 +71,58 @@ pub fn get_status() -> CompanionStatus {
     }
 }
 
+/// Pair with a ForgeAI Gateway by redeeming a pairing code
+#[tauri::command]
+pub async fn pair_with_gateway(gateway_url: String, pairing_code: String) -> Result<String, String> {
+    let url = format!("{}/api/companion/pair", gateway_url.trim_end_matches('/'));
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(&url)
+        .json(&serde_json::json!({
+            "code": pairing_code,
+            "deviceName": hostname::get()
+                .map(|h| h.to_string_lossy().to_string())
+                .unwrap_or_else(|_| "Unknown".into()),
+        }))
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+        .map_err(|e| format!("Connection failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("Gateway returned HTTP {}", resp.status()));
+    }
+
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Invalid response: {}", e))?;
+
+    let success = body["success"].as_bool().unwrap_or(false);
+    if !success {
+        let msg = body["message"].as_str().unwrap_or("Pairing failed");
+        return Err(msg.to_string());
+    }
+
+    let companion_id = body["companionId"]
+        .as_str()
+        .unwrap_or("unknown")
+        .to_string();
+    let role = body["role"].as_str().unwrap_or("user").to_string();
+
+    let creds = crate::connection::CompanionCredentials {
+        gateway_url: gateway_url.trim_end_matches('/').to_string(),
+        companion_id,
+        role,
+    };
+
+    crate::connection::GatewayConnection::save_credentials(&creds)?;
+    log::info!("Paired with Gateway at {}", creds.gateway_url);
+
+    Ok("Paired successfully!".into())
+}
+
 /// Delete stored credentials (disconnect)
 #[tauri::command]
 pub fn disconnect() -> Result<String, String> {
@@ -172,7 +224,7 @@ pub async fn voice_speak(text: String) -> Result<String, String> {
 
     let engine = VoiceEngine::new();
     engine
-        .speak(&creds.gateway_url, &creds.jwt_token, &text)
+        .speak(&creds.gateway_url, &creds.companion_id, &text)
         .await?;
 
     Ok("Speech played".into())

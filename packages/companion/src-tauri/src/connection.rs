@@ -45,9 +45,8 @@ pub struct OutgoingMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompanionCredentials {
     pub gateway_url: String,
-    pub jwt_token: String,
-    pub refresh_token: String,
-    pub node_api_key: String,
+    pub companion_id: String,
+    pub role: String,
 }
 
 /// ForgeAI Gateway connection manager
@@ -136,17 +135,13 @@ impl GatewayConnection {
 
         let creds = CompanionCredentials {
             gateway_url: base_url.to_string(),
-            jwt_token: data["token"]
+            companion_id: data["companionId"]
                 .as_str()
                 .unwrap_or_default()
                 .to_string(),
-            refresh_token: data["refreshToken"]
+            role: data["role"]
                 .as_str()
-                .unwrap_or_default()
-                .to_string(),
-            node_api_key: data["apiKey"]
-                .as_str()
-                .unwrap_or_default()
+                .unwrap_or("user")
                 .to_string(),
         };
 
@@ -174,7 +169,7 @@ impl GatewayConnection {
             .gateway_url
             .replace("https://", "wss://")
             .replace("http://", "ws://");
-        let ws_url = format!("{}/ws?token={}", ws_url, creds.jwt_token);
+        let ws_url = format!("{}/ws?companionId={}", ws_url, creds.companion_id);
 
         let (ws_stream, _) = connect_async(&ws_url)
             .await

@@ -9,7 +9,7 @@ edition = "2021"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "protocol-asset"] }
+tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
@@ -34,6 +34,7 @@ cpal = "0.15"
 rodio = { version = "0.19", default-features = false, features = ["wav"] }
 hound = "3.5"
 base64 = "0.22"
+hostname = "0.4"
 
 [features]
 default = ["custom-protocol"]

@@ -4204,6 +4204,32 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
     return pairingManager.getStats();
   });
 
+  // ─── Companion Pairing (REST redeem for desktop app) ────────────────
+  app.post<{ Body: { code: string; deviceName?: string } }>(
+    '/api/companion/pair',
+    async (request) => {
+      if (!pairingManager) return { success: false, message: 'Pairing not available' };
+      const { code, deviceName } = request.body ?? {};
+      if (!code) return { success: false, message: 'Missing pairing code' };
+
+      const companionId = `companion-${Date.now().toString(36)}`;
+      const result = pairingManager.redeem(code, companionId, 'companion');
+
+      if (!result.success) {
+        return { success: false, message: result.message };
+      }
+
+      logger.info('Companion paired via REST', { companionId, deviceName, role: result.role });
+
+      return {
+        success: true,
+        companionId,
+        role: result.role,
+        message: result.message,
+      };
+    }
+  );
+
   logger.info('Pairing routes registered');
 
   // ─── Workspace Prompts API ────────────────────────────
