@@ -30,7 +30,7 @@ export default function PluginStorePage() {
 
   async function loadPlugins() {
     try {
-      const data = await api.get('/api/plugins/store');
+      const data = await api.get<{ plugins?: typeof plugins }>('/api/plugins/store');
       setPlugins(data.plugins ?? []);
     } catch {
       setPlugins([]);

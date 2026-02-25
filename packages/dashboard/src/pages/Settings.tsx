@@ -893,7 +893,7 @@ export function SettingsPage() {
           {haError && <p className="text-xs text-red-400 font-medium">{haError}</p>}
           {haTestResult && (
             <p className={`text-xs font-medium ${haTestResult.ok ? 'text-emerald-400' : 'text-red-400'}`}>
-              {haTestResult.ok ? `Connected! ${haTestResult.message || ''}${haTestResult.version ? ` (v${haTestResult.version})` : ''}` : `Test failed: ${haTestResult.message || haTestResult.error}`}
+              {haTestResult.ok ? `Connected! ${haTestResult.message || ''}${haTestResult.version ? ` (v${haTestResult.version})` : ''}` : `Test failed: ${haTestResult.message || 'Unknown error'}`}
             </p>
           )}
 
