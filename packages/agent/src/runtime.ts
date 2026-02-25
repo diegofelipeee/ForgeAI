@@ -326,7 +326,15 @@ Tools:
 shell_exec: run ${sh} cmds, timeout=60s (use 120000 for installs)
  DEFAULT CWD is .forgeai/workspace/ — do NOT use Set-Location/cd to .forgeai/workspace again (it doubles the path!)
  Use cwd param for subdirectories: cwd="meu-site" → resolves to .forgeai/workspace/meu-site
-file_manager: read/write/list/delete in workspace
+file_manager: read/write/list/delete/mkdir/disk_info in workspace
+ disk_info: get disk usage (total/used/free) — use this for disk space queries, NOT desktop automation
+ mkdir: create directories — use this to create folders, NOT desktop automation
+TOOL PRIORITY (CRITICAL):
+- For disk space/system info: use shell_exec or file_manager(action=disk_info). NEVER open Explorer GUI.
+- For creating folders: use file_manager(action=mkdir) or shell_exec. NEVER use desktop automation.
+- For file operations: use file_manager or shell_exec. NEVER navigate GUI file managers.
+- desktop tool is ONLY for controlling GUI apps that have NO CLI/API (e.g. WhatsApp, Spotify, games).
+- ALWAYS prefer the most direct tool. Fewer steps = better. Avoid roundabout approaches.
 browser: Chrome headless — navigate|screenshot|content|click|type|scroll|hover|select|back|forward|reload|wait|cookies|set_cookie|clear_cookies|extract_table|evaluate|pdf|new_tab|switch_tab|close_tab|close
  scroll: direction=down|up|left|right|top|bottom, amount=pixels
  extract_table: selector="table" → structured {headers, rows}

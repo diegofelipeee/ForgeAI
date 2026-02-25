@@ -28,6 +28,14 @@ fn main() {
         .manage(commands::VoiceState(std::sync::Mutex::new(
             voice::VoiceEngine::new(),
         )))
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            // Second instance tried to launch — focus existing window instead
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
@@ -40,6 +48,14 @@ fn main() {
             commands::check_safety,
             commands::get_safety_prompt,
             commands::get_status,
+            commands::pair_with_gateway,
+            commands::chat_send,
+            commands::chat_voice,
+            commands::play_tts,
+            commands::window_start_drag,
+            commands::window_minimize,
+            commands::window_hide,
+            commands::window_maximize,
             commands::disconnect,
             commands::get_system_info,
             commands::wake_word_start,
@@ -49,29 +65,30 @@ fn main() {
             commands::voice_record,
             commands::voice_stop,
             commands::voice_speak,
+            commands::read_screenshot,
             commands::list_audio_devices,
         ])
         .setup(|app| {
             // ─── System Tray ───
-            let show = MenuItem::with_id(app, "show", "Show ForgeAI", true, None::<&str>)?;
-            let hide = MenuItem::with_id(app, "hide", "Hide", true, None::<&str>)?;
-            let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let toggle = MenuItem::with_id(app, "toggle", "Mostrar/ocultar janela", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "Sair", true, None::<&str>)?;
 
-            let menu = Menu::with_items(app, &[&show, &hide, &quit])?;
+            let menu = Menu::with_items(app, &[&toggle, &quit])?;
 
             let _tray = TrayIconBuilder::new()
                 .menu(&menu)
+                .show_menu_on_left_click(false)
                 .tooltip("ForgeAI Companion")
                 .on_menu_event(|app, event| match event.id.as_ref() {
-                    "show" => {
+                    "toggle" => {
                         if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
-                    }
-                    "hide" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.hide();
+                            if window.is_visible().unwrap_or(false) {
+                                let _ = window.hide();
+                            } else {
+                                let _ = window.show();
+                                let _ = window.unminimize();
+                                let _ = window.set_focus();
+                            }
                         }
                     }
                     "quit" => {
@@ -80,13 +97,14 @@ fn main() {
                     _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
-                    if let tauri::tray::TrayIconEvent::Click { .. } = event {
+                    if matches!(event, tauri::tray::TrayIconEvent::Click { .. }) {
                         let app = tray.app_handle();
                         if let Some(window) = app.get_webview_window("main") {
                             if window.is_visible().unwrap_or(false) {
                                 let _ = window.hide();
                             } else {
                                 let _ = window.show();
+                                let _ = window.unminimize();
                                 let _ = window.set_focus();
                             }
                         }

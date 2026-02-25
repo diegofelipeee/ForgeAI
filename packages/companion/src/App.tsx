@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { Flame, Send, Settings, X, Minus, Square, Link, Key, ArrowRight, Mic, MicOff, Volume2, Download, ZoomIn } from 'lucide-react';
 
-// Tauri API will be available at runtime via window.__TAURI__
+// Tauri API
 declare global {
   interface Window {
     __TAURI__?: {
@@ -8,6 +9,7 @@ declare global {
         invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
       };
     };
+    __showAbout?: () => void;
   }
 }
 
@@ -21,13 +23,76 @@ interface CompanionStatus {
   version: string;
 }
 
+interface AgentStep {
+  type: string;
+  tool?: string;
+  args?: Record<string, unknown>;
+  result?: string;
+  success?: boolean;
+  duration?: number;
+  message?: string;
+}
+
 interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: number;
+  images?: string[]; // URLs or base64 data URIs for screenshots
+  steps?: AgentStep[];
 }
 
-type View = 'chat' | 'setup' | 'settings';
+type View = 'chat' | 'setup' | 'settings' | 'about';
+
+// ─── Drag ───
+const startDrag = (e: React.MouseEvent) => {
+  if (e.button !== 0) return;
+  if ((e.target as HTMLElement).closest('button')) return;
+  // Try custom command first, then plugin API as fallback
+  invoke('window_start_drag').catch(() => {
+    invoke('plugin:window|start_dragging').catch(() => {});
+  });
+};
+
+// ─── Title Bar ───
+function TitleBar({ children }: { children?: React.ReactNode }) {
+  return (
+    <div
+      onMouseDown={startDrag}
+      className="app-titlebar h-11 flex items-center justify-between pr-4 shrink-0 cursor-grab active:cursor-grabbing"
+    >
+      <div className="flex items-center gap-2.5 select-none pointer-events-none">
+        <div className="w-5 h-5 rounded-md bg-gradient-to-br from-orange-500 to-orange-700 flex items-center justify-center shrink-0">
+          <Flame className="w-3 h-3 text-white" />
+        </div>
+        <span className="text-[13px] text-zinc-300 font-medium">ForgeAI Companion</span>
+      </div>
+      <div className="flex items-center gap-0.5">
+        {children}
+        <button
+          onClick={() => invoke('window_minimize')}
+          className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 rounded transition-colors"
+          title="Minimize"
+        >
+          <Minus className="w-4 h-4" />
+        </button>
+        <button
+          onClick={() => invoke('window_maximize')}
+          className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 rounded transition-colors"
+          title="Maximize"
+        >
+          <Square className="w-3 h-3" />
+        </button>
+        <button
+          onClick={() => invoke('window_hide')}
+          className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
+          title="Close to tray"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export default function App() {
   const [view, setView] = useState<View>('chat');
@@ -39,15 +104,148 @@ export default function App() {
   const [pairingCode, setPairingCode] = useState('');
   const [pairing, setPairing] = useState(false);
   const [pairError, setPairError] = useState('');
+  const [sessionId, setSessionId] = useState<string | null>(() => {
+    try { return localStorage.getItem('forgeai_session_id'); } catch { return null; }
+  });
+  const [recording, setRecording] = useState(false);
+  const [voiceMode, setVoiceMode] = useState<'idle' | 'listening' | 'processing' | 'speaking'>('idle');
+  const [wakeWordEnabled, setWakeWordEnabled] = useState(false);
+  const [wakePhrase, setWakePhrase] = useState('Hey Forge');
+  const [alwaysListening, setAlwaysListening] = useState(false);
+  const [audioLevels, setAudioLevels] = useState<number[]>([0,0,0,0,0,0,0,0,0,0,0,0]);
+  const [expandedImage, setExpandedImage] = useState<string | null>(null);
+  // Config Sync state
+  const [syncRemoteUrl, setSyncRemoteUrl] = useState('');
+  const [syncCode, setSyncCode] = useState('');
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'pushing' | 'generating' | 'success' | 'error'>('idle');
+  const [syncMessage, setSyncMessage] = useState('');
+  const [syncGeneratedCode, setSyncGeneratedCode] = useState('');
+  // Real-time agent progress via WebSocket
+  const [agentProgress, setAgentProgress] = useState<{ tool?: string; status?: string } | null>(null);
+  const [stepsExpanded, setStepsExpanded] = useState<Record<number, boolean>>({});
+  const wsRef = useRef<WebSocket | null>(null);
   const messagesEnd = useRef<HTMLDivElement>(null);
+  const voiceModeRef = useRef(voiceMode);
+  voiceModeRef.current = voiceMode;
 
+  const showAbout = useCallback(() => setView('about'), []);
+
+  // Listen for Rust events: voice-state, voice-audio-level, wake-word-detected
   useEffect(() => {
+    window.__showAbout = showAbout;
     loadStatus();
-  }, []);
+
+    const cleanups: (() => void)[] = [];
+    (async () => {
+      try {
+        const { listen } = await import('@tauri-apps/api/event');
+
+        // Voice state transitions from Rust
+        const u1 = await listen<{ state: string }>('voice-state', (ev) => {
+          const s = ev.payload.state as 'idle' | 'listening' | 'processing' | 'speaking';
+          setVoiceMode(s);
+          setRecording(s === 'listening');
+          if (s === 'idle') setAudioLevels([0,0,0,0,0,0,0,0,0,0,0,0]);
+        });
+        cleanups.push(u1 as unknown as () => void);
+
+        // Real-time audio levels for waveform
+        const u2 = await listen<{ level: number; done: boolean }>('voice-audio-level', (ev) => {
+          if (ev.payload.done) return;
+          setAudioLevels((prev) => {
+            const next = [...prev.slice(1), ev.payload.level];
+            return next;
+          });
+        });
+        cleanups.push(u2 as unknown as () => void);
+
+        // Wake word detection
+        const u3 = await listen('wake-word-detected', () => {
+          if (voiceModeRef.current === 'idle') {
+            handleVoiceJarvis();
+          }
+        });
+        cleanups.push(u3 as unknown as () => void);
+      } catch {
+        // Tauri event API not available
+      }
+    })();
+
+    return () => {
+      delete window.__showAbout;
+      cleanups.forEach((fn) => fn());
+    };
+  }, [showAbout]);
+
+  // Persist sessionId to localStorage for memory across restarts
+  useEffect(() => {
+    try {
+      if (sessionId) localStorage.setItem('forgeai_session_id', sessionId);
+      else localStorage.removeItem('forgeai_session_id');
+    } catch {}
+  }, [sessionId]);
 
   useEffect(() => {
     messagesEnd.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // WebSocket connection for real-time agent progress
+  useEffect(() => {
+    const gwUrl = status?.gateway_url;
+    if (!gwUrl || !sessionId) return;
+
+    const wsUrl = gwUrl.replace(/^http/, 'ws') + '/ws';
+    let ws: WebSocket;
+    let reconnectTimer: ReturnType<typeof setTimeout>;
+
+    const connect = () => {
+      try {
+        ws = new WebSocket(wsUrl);
+        wsRef.current = ws;
+
+        ws.onopen = () => {
+          console.log('[ForgeAI] WS connected');
+          ws.send(JSON.stringify({ type: 'session.subscribe', sessionId }));
+        };
+
+        ws.onmessage = (ev) => {
+          try {
+            const msg = JSON.parse(ev.data);
+            if (msg.type === 'agent.step' && msg.step) {
+              const step = msg.step as AgentStep;
+              if (step.type === 'tool_call') {
+                setAgentProgress({ tool: step.tool, status: 'calling' });
+              } else if (step.type === 'tool_result') {
+                setAgentProgress({ tool: step.tool, status: step.success ? 'done' : 'failed' });
+              }
+            } else if (msg.type === 'agent.progress' && msg.progress) {
+              const p = msg.progress as Record<string, string>;
+              if (p.currentTool) {
+                setAgentProgress({ tool: p.currentTool, status: p.status || 'working' });
+              }
+            } else if (msg.type === 'agent.done') {
+              setAgentProgress(null);
+            }
+          } catch {}
+        };
+
+        ws.onclose = () => {
+          wsRef.current = null;
+          reconnectTimer = setTimeout(connect, 3000);
+        };
+      } catch {}
+    };
+
+    connect();
+
+    return () => {
+      clearTimeout(reconnectTimer);
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+    };
+  }, [status?.gateway_url, sessionId]);
 
   const loadStatus = async () => {
     try {
@@ -76,6 +274,8 @@ export default function App() {
           timestamp: Date.now(),
         },
       ]);
+      // Auto-start wake word detection
+      startWakeWord();
     } catch (e) {
       setPairError(String(e));
     }
@@ -86,9 +286,133 @@ export default function App() {
     try {
       await invoke('disconnect');
       setStatus(null);
+      setSessionId(null);
       setView('setup');
       setMessages([]);
     } catch {}
+  };
+
+  // Extract local screenshot file paths from agent steps and/or message text
+  const extractScreenshotPaths = (steps?: Array<{ type: string; result?: unknown }>, content?: string): string[] => {
+    const paths: string[] = [];
+    const seen = new Set<string>();
+
+    const addPath = (rawPath: string) => {
+      // Normalize: unescape double-backslashes from JSON, keep OS-native separators
+      const normalized = rawPath.replace(/\\\\/g, '\\');
+      if (!seen.has(normalized) && normalized.includes('.forgeai')) {
+        seen.add(normalized);
+        paths.push(normalized);
+      }
+    };
+
+    // Extract "path":"..." or "screenshot":"..." from JSON strings
+    const extractFromJson = (str: string) => {
+      const jsonPattern = /"(?:path|screenshot)"\s*:\s*"([^"]+\.(?:png|jpg|jpeg|webp))"/gi;
+      let m;
+      while ((m = jsonPattern.exec(str)) !== null) addPath(m[1]);
+    };
+
+    // Extract paths in backticks or markdown ![](path) from text
+    const extractFromText = (str: string) => {
+      const backtickPattern = /`([^`]*?\.forgeai[\\\/]screenshots[\\\/][^`]*?\.(?:png|jpg|jpeg|webp))`/gi;
+      let m;
+      while ((m = backtickPattern.exec(str)) !== null) addPath(m[1]);
+      // Markdown image syntax: ![alt](path)
+      const mdImgPattern = /!\[[^\]]*\]\(([^)]*?\.forgeai[\\\/]screenshots[\\\/][^)]*?\.(?:png|jpg|jpeg|webp))\)/gi;
+      while ((m = mdImgPattern.exec(str)) !== null) addPath(m[1]);
+    };
+
+    // 1) Extract from steps (tool results)
+    if (steps && steps.length > 0) {
+      console.log('[ForgeAI] Steps received:', steps.length);
+      for (const step of steps) {
+        if (step.type === 'tool_result' && step.result) {
+          const str = typeof step.result === 'string' ? step.result : JSON.stringify(step.result);
+          extractFromJson(str);
+        }
+      }
+    }
+
+    // 2) Fallback: extract from message text content
+    if (content) {
+      extractFromText(content);
+      extractFromJson(content);
+    }
+
+    console.log('[ForgeAI] Extracted screenshot paths:', paths);
+    return paths;
+  };
+
+  // Load screenshot files via Rust backend → base64 data URLs
+  // Tries local file first; if not found, fetches from Gateway HTTP (remote VPS support)
+  const loadScreenshots = async (filePaths: string[]): Promise<string[]> => {
+    if (filePaths.length === 0) return [];
+    const gwUrl = status?.gateway_url || gatewayUrl || undefined;
+    const loaded = await Promise.all(
+      filePaths.map(async (p) => {
+        try {
+          const dataUrl = (await invoke('read_screenshot', { path: p, gatewayUrl: gwUrl })) as string;
+          console.log('[ForgeAI] Loaded screenshot:', p.split(/[\\\/]/).pop());
+          return dataUrl;
+        } catch (e) {
+          console.error('[ForgeAI] Failed to load screenshot:', p, e);
+          return null;
+        }
+      })
+    );
+    return loaded.filter((u): u is string => u !== null);
+  };
+
+  // ─── Config Sync handlers ───
+  const handleSyncPush = async () => {
+    if (!syncRemoteUrl.trim() || !syncCode.trim()) return;
+    const gwUrl = status?.gateway_url || gatewayUrl;
+    if (!gwUrl) { setSyncMessage('Not connected to a Gateway'); setSyncStatus('error'); return; }
+
+    setSyncStatus('pushing');
+    setSyncMessage('');
+    try {
+      const resp = await fetch(`${gwUrl}/api/config/sync-push`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ remoteUrl: syncRemoteUrl.trim(), syncCode: syncCode.trim() }),
+      });
+      const data = await resp.json();
+      if (data.success) {
+        setSyncStatus('success');
+        setSyncMessage(`✓ ${data.pushed} configs pushed. ${data.imported} imported on remote.`);
+      } else {
+        setSyncStatus('error');
+        setSyncMessage(data.error || 'Sync failed');
+      }
+    } catch (err: any) {
+      setSyncStatus('error');
+      setSyncMessage(err.message || 'Network error');
+    }
+  };
+
+  const handleSyncGenerate = async () => {
+    const gwUrl = status?.gateway_url || gatewayUrl;
+    if (!gwUrl) { setSyncMessage('Not connected to a Gateway'); setSyncStatus('error'); return; }
+
+    setSyncStatus('generating');
+    setSyncGeneratedCode('');
+    try {
+      const resp = await fetch(`${gwUrl}/api/config/sync-init`, { method: 'POST' });
+      const data = await resp.json();
+      if (data.success) {
+        setSyncGeneratedCode(data.syncCode);
+        setSyncStatus('idle');
+        setSyncMessage(`Code expires in ${data.expiresIn}s. Enter it on the source Gateway.`);
+      } else {
+        setSyncStatus('error');
+        setSyncMessage(data.error || 'Failed to generate code');
+      }
+    } catch (err: any) {
+      setSyncStatus('error');
+      setSyncMessage(err.message || 'Network error');
+    }
   };
 
   const handleSend = async () => {
@@ -102,27 +426,38 @@ export default function App() {
     setLoading(true);
 
     try {
-      // For now, echo back — will be replaced by WebSocket message
-      const result = (await invoke('execute_action', {
-        request: {
-          action: 'shell',
-          command: text,
-          path: null,
-          content: null,
-          process_name: null,
-          app_name: null,
-          confirmed: false,
-        },
-      })) as { success: boolean; output: string; safety: { risk: string; reason: string } };
+      const result = (await invoke('chat_send', {
+        message: text,
+        sessionId,
+      })) as {
+        content: string;
+        sessionId: string;
+        model?: string;
+        blocked?: boolean;
+        blockReason?: string;
+        steps?: AgentStep[];
+      };
+
+      if (!sessionId && result.sessionId) setSessionId(result.sessionId);
+
+      const responseContent = result.blocked ? `🛡️ Blocked: ${result.blockReason || 'Safety filter'}` : result.content;
+      const screenshotPaths = extractScreenshotPaths(result.steps, responseContent);
+      const images = await loadScreenshots(screenshotPaths);
+      setAgentProgress(null);
+
+      // Filter steps to only show tool_call and tool_result pairs
+      const toolSteps = (result.steps || []).filter(
+        (s) => s.type === 'tool_call' || s.type === 'tool_result'
+      );
 
       setMessages((prev) => [
         ...prev,
         {
           role: 'assistant',
-          content: result.success
-            ? result.output
-            : `⚠️ ${result.output}`,
+          content: responseContent,
           timestamp: Date.now(),
+          images: images.length > 0 ? images : undefined,
+          steps: toolSteps.length > 0 ? toolSteps : undefined,
         },
       ]);
     } catch (e) {
@@ -134,60 +469,203 @@ export default function App() {
     setLoading(false);
   };
 
+  // Full Jarvis pipeline: record → STT → AI → TTS → play
+  // State transitions (listening/processing/speaking/idle) are driven by Rust events
+  const handleVoiceJarvis = async () => {
+    if (voiceModeRef.current !== 'idle') return;
+
+    try {
+      const result = (await invoke('chat_voice', { sessionId })) as {
+        transcription: string;
+        content: string;
+        sessionId: string;
+        ttsAudio?: string;
+        steps?: Array<{ type: string; result?: unknown }>;
+      };
+
+      if (!sessionId && result.sessionId) setSessionId(result.sessionId);
+
+      if (result.transcription) {
+        setMessages((prev) => [
+          ...prev,
+          { role: 'user', content: `🎤 ${result.transcription}`, timestamp: Date.now() },
+        ]);
+      }
+
+      if (result.content) {
+        const screenshotPaths = extractScreenshotPaths(result.steps, result.content);
+        const images = await loadScreenshots(screenshotPaths);
+        setMessages((prev) => [
+          ...prev,
+          { role: 'assistant', content: result.content, timestamp: Date.now(), images: images.length > 0 ? images : undefined },
+        ]);
+      }
+    } catch (e) {
+      const errMsg = String(e);
+      if (!errMsg.includes('too short')) {
+        setMessages((prev) => [
+          ...prev,
+          { role: 'assistant', content: `Voice error: ${errMsg}`, timestamp: Date.now() },
+        ]);
+      }
+    }
+  };
+
+  const handleMicToggle = async () => {
+    if (voiceMode !== 'idle') {
+      setVoiceMode('idle');
+      setRecording(false);
+      setAudioLevels([0,0,0,0,0,0,0,0,0,0,0,0]);
+      try { await invoke('voice_stop'); } catch {}
+    } else {
+      handleVoiceJarvis();
+    }
+  };
+
+  // Start wake word detection when connected
+  const startWakeWord = async () => {
+    try {
+      await invoke('wake_word_start');
+      setMessages((prev) => [
+        ...prev,
+        { role: 'system', content: '🎙️ Voice activated — say "Hey Forge" to talk.', timestamp: Date.now() },
+      ]);
+    } catch {
+      // Wake word not available (no mic or already running)
+    }
+  };
+
+  // ─── About View ───
+  if (view === 'about') {
+    return (
+      <div className="w-full h-full bg-zinc-950 flex flex-col overflow-hidden">
+        <TitleBar />
+        <div className="flex-1 flex flex-col items-center justify-center px-8 text-center">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-orange-500 to-orange-700 flex items-center justify-center mb-5 shadow-lg shadow-orange-500/20">
+            <Flame className="w-8 h-8 text-white" />
+          </div>
+          <h2 className="text-lg font-bold text-white">ForgeAI Companion</h2>
+          <p className="text-xs text-zinc-500 mt-1">Version {status?.version || '1.0.0'}</p>
+          <div className="mt-6 w-full space-y-2 text-xs">
+            <div className="flex justify-between py-2 px-3 rounded-lg bg-zinc-900/60 border border-zinc-800/50">
+              <span className="text-zinc-500">Safety System</span>
+              <span className="text-emerald-400">Active</span>
+            </div>
+            <div className="flex justify-between py-2 px-3 rounded-lg bg-zinc-900/60 border border-zinc-800/50">
+              <span className="text-zinc-500">Platform</span>
+              <span className="text-zinc-300">Windows x64</span>
+            </div>
+            <div className="flex justify-between py-2 px-3 rounded-lg bg-zinc-900/60 border border-zinc-800/50">
+              <span className="text-zinc-500">Engine</span>
+              <span className="text-zinc-300">Tauri 2 + Rust</span>
+            </div>
+          </div>
+          <p className="text-[10px] text-zinc-600 mt-6">getforgeai.com</p>
+          <button
+            onClick={() => setView(status?.connected ? 'chat' : 'setup')}
+            className="mt-4 px-6 py-2 rounded-lg text-xs font-medium text-zinc-400 hover:text-white bg-zinc-800 hover:bg-zinc-700 transition-all"
+          >
+            Back
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // ─── Setup View ───
   if (view === 'setup') {
     return (
-      <div className="w-[380px] h-[520px] bg-zinc-950/95 backdrop-blur-xl rounded-2xl border border-zinc-800 flex flex-col overflow-hidden">
-        <div data-tauri-drag-region className="px-5 py-4 border-b border-zinc-800">
-          <h1 className="text-lg font-bold text-white">ForgeAI Companion</h1>
-          <p className="text-[11px] text-zinc-500">Connect to your ForgeAI Gateway</p>
-        </div>
+      <div className="w-full h-full bg-zinc-950 flex flex-col overflow-hidden">
+        <TitleBar />
 
-        <div className="flex-1 p-5 flex flex-col justify-center gap-4">
-          <div className="w-16 h-16 mx-auto rounded-2xl bg-indigo-500/20 flex items-center justify-center mb-2">
-            <svg className="w-8 h-8 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m9.86-2.44a4.5 4.5 0 00-6.364-6.364L4.5 8.25" />
-            </svg>
+        {/* Content */}
+        <div className="flex-1 flex flex-col items-center" style={{ padding: '24px 28px 16px' }}>
+          {/* Logo + title */}
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-orange-500 to-orange-700 flex items-center justify-center shadow-lg shadow-orange-500/20 mb-4">
+            <Flame className="w-7 h-7 text-white" />
           </div>
+          <h1 className="text-xl font-bold text-white">Connect to Gateway</h1>
+          <p className="text-sm text-zinc-500 mt-1">Enter your Gateway URL and pairing code</p>
 
-          <div>
-            <label className="text-xs text-zinc-400 mb-1 block">Gateway URL</label>
-            <input
-              type="url"
-              placeholder="http://127.0.0.1:18800 or https://your-vps.com:18800"
-              value={gatewayUrl}
-              onChange={(e) => setGatewayUrl(e.target.value)}
-              className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 font-mono"
-            />
-          </div>
+          {/* Form card */}
+          <div className="setup-card" style={{ marginTop: 24 }}>
+            {/* Gateway URL */}
+            <div style={{ marginBottom: 20 }}>
+              <label className="setup-label">Gateway URL</label>
+              <div className="setup-input-wrap">
+                <div className="setup-input-icon">
+                  <Link className="w-4 h-4" />
+                </div>
+                <input
+                  type="url"
+                  placeholder="http://localhost:18800"
+                  value={gatewayUrl}
+                  onChange={(e) => setGatewayUrl(e.target.value)}
+                  className="setup-input"
+                />
+              </div>
+            </div>
 
-          <div>
-            <label className="text-xs text-zinc-400 mb-1 block">Pairing Code</label>
-            <input
-              type="text"
-              placeholder="6-digit code from Dashboard"
-              value={pairingCode}
-              onChange={(e) => setPairingCode(e.target.value)}
-              maxLength={6}
-              className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 font-mono text-center text-lg tracking-[0.3em]"
-            />
+            {/* Pairing Code */}
+            <div>
+              <label className="setup-label">Pairing Code</label>
+              <div className="setup-input-wrap">
+                <div className="setup-input-icon">
+                  <Key className="w-4 h-4" />
+                </div>
+                <input
+                  type="text"
+                  placeholder="FORGE-ABCD-1234"
+                  value={pairingCode}
+                  onChange={(e) => setPairingCode(e.target.value.toUpperCase())}
+                  maxLength={20}
+                  className="setup-input"
+                  style={{ letterSpacing: '0.05em' }}
+                />
+              </div>
+            </div>
           </div>
 
           {pairError && (
-            <p className="text-xs text-red-400 bg-red-500/10 rounded-lg px-3 py-2">{pairError}</p>
+            <div style={{ width: '100%', marginTop: 12, fontSize: 12, color: '#f87171', background: '#1c1917', border: '1px solid #7f1d1d', borderRadius: 12, padding: '10px 16px' }}>
+              {pairError}
+            </div>
           )}
 
+          {/* Connect button */}
           <button
             onClick={handlePair}
             disabled={pairing || !gatewayUrl.trim() || pairingCode.length < 6}
-            className="w-full py-2.5 rounded-lg text-white text-sm font-medium bg-indigo-500 hover:bg-indigo-600 disabled:bg-zinc-700 disabled:cursor-not-allowed transition-all"
+            className="setup-btn"
+            style={{ marginTop: 20 }}
           >
             {pairing ? 'Connecting...' : 'Connect'}
+            {!pairing && (
+              <span className="setup-btn-arrow">
+                <ArrowRight className="w-5 h-5" style={{ color: 'white' }} />
+              </span>
+            )}
           </button>
 
-          <p className="text-[10px] text-zinc-600 text-center">
-            Generate a pairing code at Dashboard → Settings → Pairing
-          </p>
+          {/* Status indicator */}
+          <div className="flex items-center gap-2 mt-4">
+            <div className="w-2 h-2 rounded-full bg-emerald-500" />
+            <span className="text-sm text-zinc-400">
+              <span className="text-emerald-400 font-medium">Ready</span> to connect
+            </span>
+          </div>
+
+          {/* Spacer */}
+          <div className="flex-1" />
+
+          {/* Footer */}
+          <div className="flex items-center gap-3 text-[12px] text-zinc-600 pt-4">
+            <span>Dashboard</span>
+            <span className="text-zinc-700">&bull;</span>
+            <span>Settings</span>
+            <span className="text-zinc-700">&bull;</span>
+            <span>Pairing</span>
+          </div>
         </div>
       </div>
     );
@@ -195,73 +673,186 @@ export default function App() {
 
   // ─── Chat View ───
   return (
-    <div className="w-[380px] h-[520px] bg-zinc-950/95 backdrop-blur-xl rounded-2xl border border-zinc-800 flex flex-col overflow-hidden">
+    <div className="w-full h-full bg-zinc-950 flex flex-col overflow-hidden">
       {/* Header */}
-      <div data-tauri-drag-region className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
-          <div className="relative">
-            <div className="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center">
-              <svg className="w-4 h-4 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
-              </svg>
-            </div>
-            <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-zinc-950" />
-          </div>
-          <div>
-            <p className="text-sm font-medium text-white leading-tight">ForgeAI</p>
-            <p className="text-[10px] text-emerald-400">Connected</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => setView(view === 'settings' ? 'chat' : 'settings')}
-            className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-all"
-            title="Settings"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 010 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 010-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28z" />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-          </button>
-        </div>
-      </div>
+      <TitleBar>
+        <button
+          onClick={() => setView(view === 'settings' ? 'chat' : 'settings')}
+          className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 rounded transition-colors"
+          title="Settings"
+        >
+          <Settings className="w-4 h-4" />
+        </button>
+      </TitleBar>
 
-      {/* Settings panel */}
+      {/* Settings View */}
       {view === 'settings' && (
-        <div className="p-4 border-b border-zinc-800 bg-zinc-900/50 space-y-3 animate-fade-in">
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-zinc-400">Gateway</span>
-            <span className="text-xs text-zinc-300 font-mono">{status?.gateway_url || '—'}</span>
+        <div className="settings-view">
+          {/* Voice Section */}
+          <div className="settings-section">
+            <div className="settings-section-title">Voice Assistant</div>
+
+            <div className="settings-row">
+              <div className="settings-row-left">
+                <span className="settings-label">Wake Word</span>
+                <span className="settings-hint">Activate by voice command</span>
+              </div>
+              <label className="settings-toggle">
+                <input
+                  type="checkbox"
+                  title="Toggle wake word detection"
+                  checked={wakeWordEnabled}
+                  onChange={(e) => {
+                    setWakeWordEnabled(e.target.checked);
+                    if (e.target.checked) {
+                      startWakeWord();
+                    } else {
+                      invoke('wake_word_stop').catch(() => {});
+                    }
+                  }}
+                />
+                <span className="settings-toggle-slider" />
+              </label>
+            </div>
+
+            <div className="settings-row">
+              <div className="settings-row-left">
+                <span className="settings-label">Trigger Phrase</span>
+              </div>
+              <select
+                className="settings-select"
+                title="Select trigger phrase"
+                value={wakePhrase}
+                onChange={(e) => setWakePhrase(e.target.value)}
+              >
+                <option value="Hey Forge">Hey Forge</option>
+                <option value="Olá Forge">Olá Forge</option>
+                <option value="Forge Online">Forge Online</option>
+                <option value="Ok Forge">Ok Forge</option>
+              </select>
+            </div>
+
+            <div className="settings-row">
+              <div className="settings-row-left">
+                <span className="settings-label">Always Listening</span>
+                <span className="settings-hint">Keep mic open, only respond on wake word</span>
+              </div>
+              <label className="settings-toggle">
+                <input
+                  type="checkbox"
+                  title="Toggle always listening mode"
+                  checked={alwaysListening}
+                  onChange={(e) => setAlwaysListening(e.target.checked)}
+                />
+                <span className="settings-toggle-slider" />
+              </label>
+            </div>
           </div>
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-zinc-400">Safety System</span>
-            <span className="text-xs text-emerald-400">Active</span>
+
+          {/* Connection Section */}
+          <div className="settings-section">
+            <div className="settings-section-title">Connection</div>
+
+            <div className="settings-row">
+              <span className="settings-label">Gateway</span>
+              <span className="settings-value">{status?.gateway_url || '—'}</span>
+            </div>
+            <div className="settings-row">
+              <span className="settings-label">Safety</span>
+              <span className="settings-value settings-value-active">Active</span>
+            </div>
+            <div className="settings-row">
+              <span className="settings-label">Version</span>
+              <span className="settings-value">{status?.version || '—'}</span>
+            </div>
           </div>
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-zinc-400">Version</span>
-            <span className="text-xs text-zinc-300">{status?.version || '—'}</span>
+
+          {/* Config Sync Section */}
+          <div className="settings-section">
+            <div className="settings-section-title">Config Sync</div>
+            <span className="settings-hint sync-hint">
+              Transfer API keys, TTS, channels and all settings to a remote Gateway securely.
+            </span>
+
+            {/* Push Config to Remote */}
+            <div className="sync-subsection">
+              <span className="settings-label">Push to Remote</span>
+              <input
+                type="text"
+                placeholder="Remote URL (e.g. http://167.86.85.73:18800)"
+                className="sync-input"
+                value={syncRemoteUrl}
+                onChange={(e) => setSyncRemoteUrl(e.target.value)}
+              />
+              <input
+                type="text"
+                placeholder="Sync Code (8 chars)"
+                className="sync-input sync-input-code"
+                maxLength={8}
+                value={syncCode}
+                onChange={(e) => setSyncCode(e.target.value.toUpperCase())}
+              />
+              <button
+                className="settings-btn settings-btn-primary"
+                onClick={handleSyncPush}
+                disabled={syncStatus === 'pushing' || !syncRemoteUrl.trim() || !syncCode.trim()}
+              >
+                {syncStatus === 'pushing' ? 'Sending...' : 'Push Config'}
+              </button>
+            </div>
+
+            {/* Generate Receive Code */}
+            <div className="sync-subsection">
+              <span className="settings-label">Receive from Another</span>
+              <span className="settings-hint">Generate a code so another Gateway can push config here.</span>
+              <button
+                className="settings-btn settings-btn-secondary"
+                onClick={handleSyncGenerate}
+                disabled={syncStatus === 'generating'}
+              >
+                {syncStatus === 'generating' ? 'Generating...' : 'Generate Sync Code'}
+              </button>
+              {syncGeneratedCode && (
+                <div className="sync-code-display">{syncGeneratedCode}</div>
+              )}
+            </div>
+
+            {/* Status message */}
+            {syncMessage && (
+              <div className={`sync-message ${syncStatus === 'error' ? 'sync-message-error' : syncStatus === 'success' ? 'sync-message-success' : ''}`}>
+                {syncMessage}
+              </div>
+            )}
           </div>
-          <button
-            onClick={handleDisconnect}
-            className="w-full py-2 rounded-lg text-red-400 text-xs font-medium border border-red-500/30 hover:bg-red-500/10 transition-all"
-          >
-            Disconnect
-          </button>
+
+          {/* Actions */}
+          <div className="settings-actions">
+            <button
+              onClick={() => setView('about')}
+              className="settings-btn settings-btn-secondary"
+            >
+              About
+            </button>
+            <button
+              onClick={handleDisconnect}
+              className="settings-btn settings-btn-danger"
+            >
+              Disconnect
+            </button>
+          </div>
         </div>
       )}
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+      <div className="chat-messages">
         {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full text-center">
-            <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 flex items-center justify-center mb-3 animate-float">
-              <svg className="w-7 h-7 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
-              </svg>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', textAlign: 'center' }}>
+            <div style={{ width: 48, height: 48, borderRadius: 12, background: 'linear-gradient(135deg, #f97316, #c2410c)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
+              <Flame style={{ width: 24, height: 24, color: 'white' }} />
             </div>
-            <p className="text-sm text-zinc-400 font-medium">Hey! I'm ForgeAI</p>
-            <p className="text-[11px] text-zinc-600 mt-1 max-w-[240px]">
-              Ask me anything or give me a command. I can manage files, launch apps, control your smart home, and more.
+            <p style={{ fontSize: 13, color: '#a1a1aa', fontWeight: 500 }}>Hey! I'm ForgeAI</p>
+            <p style={{ fontSize: 11, color: '#52525b', marginTop: 4, maxWidth: 220 }}>
+              Ask me anything or give me a command. I can manage files, launch apps, and more.
             </p>
           </div>
         )}
@@ -269,59 +860,147 @@ export default function App() {
         {messages.map((msg, i) => (
           <div
             key={i}
-            className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in`}
+            className={`chat-bubble chat-bubble-${msg.role}`}
           >
-            <div
-              className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed ${
-                msg.role === 'user'
-                  ? 'bg-indigo-500 text-white rounded-br-md'
-                  : msg.role === 'system'
-                  ? 'bg-zinc-800/50 text-zinc-400 border border-zinc-700/50 rounded-bl-md'
-                  : 'bg-zinc-800 text-zinc-200 rounded-bl-md'
-              }`}
-            >
-              <pre className="whitespace-pre-wrap font-[inherit]">{msg.content}</pre>
-            </div>
+            {/* Tool steps (collapsible) */}
+            {msg.steps && msg.steps.length > 0 && (
+              <div className="step-container">
+                <button
+                  className="step-toggle"
+                  onClick={() => setStepsExpanded((prev) => ({ ...prev, [i]: !prev[i] }))}
+                >
+                  <span className="step-toggle-icon">{stepsExpanded[i] ? '▾' : '▸'}</span>
+                  <span>{msg.steps.filter(s => s.type === 'tool_call').length} tool{msg.steps.filter(s => s.type === 'tool_call').length !== 1 ? 's' : ''} used</span>
+                </button>
+                {stepsExpanded[i] && (
+                  <div className="step-list">
+                    {msg.steps.filter(s => s.type === 'tool_result').map((step, si) => (
+                      <div key={si} className={`step-item ${step.success ? 'step-success' : 'step-fail'}`}>
+                        <span className="step-icon">{step.success ? '✓' : '✗'}</span>
+                        <span className="step-tool">{step.tool}</span>
+                        {step.duration != null && <span className="step-dur">{step.duration}ms</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            <pre>{msg.content}</pre>
+            {msg.images && msg.images.length > 0 && (
+              <div className="chat-bubble-images">
+                {msg.images.map((src, j) => (
+                  <div key={j} className="chat-bubble-img-wrapper">
+                    <img
+                      src={src}
+                      alt={`Screenshot ${j + 1}`}
+                      className="chat-bubble-img"
+                      onClick={() => setExpandedImage(src)}
+                    />
+                    <div className="chat-bubble-img-overlay">
+                      <ZoomIn className="w-4 h-4" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         ))}
 
         {loading && (
-          <div className="flex justify-start animate-fade-in">
-            <div className="bg-zinc-800 rounded-2xl rounded-bl-md px-4 py-3">
-              <div className="flex gap-1.5">
-                <div className="w-1.5 h-1.5 rounded-full bg-zinc-500 animate-bounce bounce-dot-1" />
-                <div className="w-1.5 h-1.5 rounded-full bg-zinc-500 animate-bounce bounce-dot-2" />
-                <div className="w-1.5 h-1.5 rounded-full bg-zinc-500 animate-bounce bounce-dot-3" />
+          <div className="chat-bubble chat-bubble-assistant loading-bubble">
+            {agentProgress?.tool ? (
+              <div className="agent-progress">
+                <div className="agent-progress-dot" />
+                <span className="agent-progress-text">
+                  {agentProgress.status === 'calling' ? `Calling ${agentProgress.tool}...` :
+                   agentProgress.status === 'done' ? `${agentProgress.tool} done` :
+                   agentProgress.status === 'failed' ? `${agentProgress.tool} failed` :
+                   `Using ${agentProgress.tool}...`}
+                </span>
               </div>
-            </div>
+            ) : (
+              <div className="loading-dots">
+                <div className="loading-dot" />
+                <div className="loading-dot" />
+                <div className="loading-dot" />
+              </div>
+            )}
           </div>
         )}
 
         <div ref={messagesEnd} />
       </div>
 
-      {/* Input */}
-      <div className="px-3 py-3 border-t border-zinc-800">
-        <div className="flex items-center gap-2">
-          <input
-            type="text"
-            placeholder="Type a message..."
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-            className="flex-1 bg-zinc-900 border border-zinc-700 rounded-xl px-3.5 py-2.5 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
-          />
-          <button
-            onClick={handleSend}
-            disabled={loading || !input.trim()}
-            className="w-9 h-9 rounded-xl bg-indigo-500 hover:bg-indigo-600 disabled:bg-zinc-700 flex items-center justify-center transition-all"
-            title="Send message"
-          >
-            <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
-            </svg>
-          </button>
+      {/* Voice Waveform Visualizer */}
+      {voiceMode !== 'idle' && (
+        <div className={`voice-viz voice-viz-${voiceMode}`}>
+          <div className="voice-viz-bars">
+            {audioLevels.map((level, i) => (
+              <div
+                key={i}
+                className="voice-viz-bar"
+                data-level={Math.round(level * 10)}
+              />
+            ))}
+          </div>
+          <span className="voice-viz-label">
+            {voiceMode === 'listening' && 'Listening...'}
+            {voiceMode === 'processing' && 'Processing...'}
+            {voiceMode === 'speaking' && 'Speaking...'}
+          </span>
         </div>
+      )}
+
+      {/* Image Viewer Modal */}
+      {expandedImage && (
+        <div className="image-viewer-overlay" onClick={() => setExpandedImage(null)}>
+          <div className="image-viewer-toolbar" onClick={(e) => e.stopPropagation()}>
+            <a
+              href={expandedImage}
+              download={`screenshot_${Date.now()}.png`}
+              className="image-viewer-btn"
+              title="Download"
+            >
+              <Download className="w-4 h-4" />
+            </a>
+            <button className="image-viewer-btn" onClick={() => setExpandedImage(null)} title="Close">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <img
+            src={expandedImage}
+            alt="Screenshot expanded"
+            className="image-viewer-img"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
+
+      {/* Input */}
+      <div className="chat-input-bar">
+        <button
+          onClick={handleMicToggle}
+          className={`chat-mic-btn ${voiceMode !== 'idle' ? 'recording' : ''}`}
+          title={voiceMode !== 'idle' ? 'Stop' : 'Voice input (Jarvis mode)'}
+        >
+          {voiceMode !== 'idle' ? <MicOff style={{ width: 16, height: 16 }} /> : <Mic style={{ width: 16, height: 16 }} />}
+        </button>
+        <input
+          type="text"
+          placeholder="Type a message..."
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+          className="chat-input"
+        />
+        <button
+          onClick={handleSend}
+          disabled={loading || !input.trim()}
+          className="chat-send-btn"
+          title="Send message"
+        >
+          <Send style={{ width: 16, height: 16, color: 'white' }} />
+        </button>
       </div>
     </div>
   );

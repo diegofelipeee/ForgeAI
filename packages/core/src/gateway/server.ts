@@ -14,6 +14,7 @@ import {
   type HealthStatus,
 } from '@forgeai/shared';
 import { registerChatRoutes, getTelegramChannel } from './chat-routes.js';
+import { registerConfigSyncRoutes } from './config-sync.js';
 import { getWSBroadcaster } from './ws-broadcaster.js';
 import {
   createJWTAuth,
@@ -148,6 +149,7 @@ export class Gateway {
     this.registerHealthRoutes();
     this.registerSecuritySummaryRoutes();
     this.registerBackupRoutes();
+    registerConfigSyncRoutes(this.app, this.vault);
     this.registerAuthRoutes();
     this.registerSMTPRoutes();
     this.registerSetupWizardRoutes();
@@ -251,6 +253,7 @@ export class Gateway {
       '/auth/verify-totp', '/auth/setup-2fa', '/auth/verify-email', '/auth/change-pin',
       '/setup', '/api/setup/smtp', '/api/setup/init-2fa', '/api/setup/complete',
       '/api/googlechat/webhook',
+      '/api/companion/pair',
       '/manifest.json', '/sw.js', '/forge.svg', '/favicon.ico',
     ]);
     const AUTH_EXEMPT_PREFIX = [

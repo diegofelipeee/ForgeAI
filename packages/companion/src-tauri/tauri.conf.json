@@ -15,16 +15,14 @@
         "label": "main",
         "title": "ForgeAI Companion",
         "width": 380,
-        "height": 520,
+        "height": 620,
         "resizable": false,
         "decorations": false,
-        "transparent": true,
-        "alwaysOnTop": true,
-        "visible": false,
-        "skipTaskbar": true,
-        "center": false,
-        "x": 1500,
-        "y": 800
+        "transparent": false,
+        "alwaysOnTop": false,
+        "visible": true,
+        "skipTaskbar": false,
+        "center": true
       }
     ],
     "trayIcon": {
@@ -33,7 +31,7 @@
       "tooltip": "ForgeAI Companion"
     },
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' wss://* ws://* https://*; img-src 'self' data:; style-src 'self' 'unsafe-inline'"
+      "csp": "default-src 'self'; connect-src 'self' wss://* ws://* https://* http://*; img-src 'self' data: http://* https://*; style-src 'self' 'unsafe-inline'"
     }
   },
   "bundle": {

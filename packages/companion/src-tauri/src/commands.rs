@@ -3,6 +3,7 @@
 //! These are the commands exposed to the React frontend via Tauri's invoke system.
 //! Every command that performs a local action goes through the safety system.
 
+use base64::Engine as _;
 use crate::local_actions::{self, ActionRequest, ActionResult};
 use crate::safety;
 use serde::{Deserialize, Serialize};
@@ -69,6 +70,246 @@ pub fn get_status() -> CompanionStatus {
         safety_active: true,
         version: env!("CARGO_PKG_VERSION").to_string(),
     }
+}
+
+/// Pair with a ForgeAI Gateway by redeeming a pairing code
+#[tauri::command]
+pub async fn pair_with_gateway(gateway_url: String, pairing_code: String) -> Result<String, String> {
+    let url = format!("{}/api/companion/pair", gateway_url.trim_end_matches('/'));
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(&url)
+        .json(&serde_json::json!({
+            "code": pairing_code,
+            "deviceName": hostname::get()
+                .map(|h| h.to_string_lossy().to_string())
+                .unwrap_or_else(|_| "Unknown".into()),
+        }))
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+        .map_err(|e| format!("Connection failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("Gateway returned HTTP {}", resp.status()));
+    }
+
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Invalid response: {}", e))?;
+
+    let success = body["success"].as_bool().unwrap_or(false);
+    if !success {
+        let msg = body["message"].as_str().unwrap_or("Pairing failed");
+        return Err(msg.to_string());
+    }
+
+    let companion_id = body["companionId"]
+        .as_str()
+        .unwrap_or("unknown")
+        .to_string();
+    let role = body["role"].as_str().unwrap_or("user").to_string();
+
+    let creds = crate::connection::CompanionCredentials {
+        gateway_url: gateway_url.trim_end_matches('/').to_string(),
+        companion_id,
+        role,
+    };
+
+    crate::connection::GatewayConnection::save_credentials(&creds)?;
+    log::info!("Paired with Gateway at {}", creds.gateway_url);
+
+    Ok("Paired successfully!".into())
+}
+
+/// Start dragging the window
+#[tauri::command]
+pub fn window_start_drag(window: tauri::Window) -> Result<(), String> {
+    window.start_dragging().map_err(|e| e.to_string())
+}
+
+/// Minimize the main window
+#[tauri::command]
+pub fn window_minimize(window: tauri::Window) -> Result<(), String> {
+    window.minimize().map_err(|e| e.to_string())
+}
+
+/// Hide the main window (close to tray)
+#[tauri::command]
+pub fn window_hide(window: tauri::Window) -> Result<(), String> {
+    window.hide().map_err(|e| e.to_string())
+}
+
+/// Toggle maximize/restore
+#[tauri::command]
+pub fn window_maximize(window: tauri::Window) -> Result<(), String> {
+    if window.is_maximized().unwrap_or(false) {
+        window.unmaximize().map_err(|e| e.to_string())
+    } else {
+        window.maximize().map_err(|e| e.to_string())
+    }
+}
+
+/// Send a chat message to the Gateway and get AI response
+#[tauri::command]
+pub async fn chat_send(message: String, session_id: Option<String>) -> Result<serde_json::Value, String> {
+    let creds = crate::connection::GatewayConnection::load_credentials()
+        .ok_or("Not connected — pair first")?;
+
+    let url = format!("{}/api/chat", creds.gateway_url);
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(&url)
+        .json(&serde_json::json!({
+            "message": message,
+            "sessionId": session_id,
+            "userId": creds.companion_id,
+        }))
+        .timeout(std::time::Duration::from_secs(120))
+        .send()
+        .await
+        .map_err(|e| format!("Gateway request failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Gateway HTTP {}: {}", status, body));
+    }
+
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Invalid response: {}", e))?;
+
+    Ok(body)
+}
+
+/// Full voice pipeline: record mic → send to Gateway STT+AI+TTS → play response → return text
+/// This is the "Jarvis" command — speak to ForgeAI, get a spoken answer back.
+/// Emits events: voice-state (listening/processing/speaking/idle), voice-audio-level
+#[tauri::command]
+pub async fn chat_voice(
+    app_handle: tauri::AppHandle,
+    state: State<'_, VoiceState>,
+    session_id: Option<String>,
+) -> Result<serde_json::Value, String> {
+    use tauri::Emitter;
+    let creds = crate::connection::GatewayConnection::load_credentials()
+        .ok_or("Not connected — pair first")?;
+
+    // Emit: LISTENING
+    let _ = app_handle.emit("voice-state", serde_json::json!({ "state": "listening" }));
+
+    // Step 1: Record audio from microphone (emits audio levels in real-time)
+    log::info!("Jarvis: recording...");
+    let audio = {
+        let engine = state.0.lock().map_err(|e| {
+            let _ = app_handle.emit("voice-state", serde_json::json!({ "state": "idle" }));
+            e.to_string()
+        })?;
+        match engine.record_with_events(&app_handle) {
+            Ok(a) => a,
+            Err(e) => {
+                let _ = app_handle.emit("voice-state", serde_json::json!({ "state": "idle" }));
+                return Err(e);
+            }
+        }
+    };
+    log::info!("Jarvis: recorded {}ms of audio", audio.duration_ms);
+
+    // Emit: PROCESSING
+    let _ = app_handle.emit("voice-state", serde_json::json!({ "state": "processing" }));
+
+    // Step 2: Send audio to Gateway /api/chat/voice for STT → AI → TTS
+    // Retry once on connection errors (server may be busy with agent tools)
+    let url = format!("{}/api/chat/voice", creds.gateway_url);
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(180))
+        .build()
+        .map_err(|e| format!("HTTP client error: {}", e))?;
+
+    let payload = serde_json::json!({
+        "audio": audio.wav_base64,
+        "format": "wav",
+        "sessionId": session_id,
+        "userId": creds.companion_id,
+        "ttsResponse": true,
+    });
+
+    let mut last_err = String::new();
+    let mut resp_opt = None;
+    for attempt in 0..2 {
+        match client.post(&url).json(&payload).send().await {
+            Ok(r) => { resp_opt = Some(r); break; }
+            Err(e) => {
+                last_err = format!("{}", e);
+                log::warn!("Jarvis: Gateway request attempt {} failed: {}", attempt + 1, last_err);
+                if attempt == 0 {
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                }
+            }
+        }
+    }
+
+    let resp = match resp_opt {
+        Some(r) => r,
+        None => {
+            let _ = app_handle.emit("voice-state", serde_json::json!({ "state": "idle" }));
+            return Err(format!("Gateway unreachable after 2 attempts: {}", last_err));
+        }
+    };
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        let _ = app_handle.emit("voice-state", serde_json::json!({ "state": "idle" }));
+        return Err(format!("Gateway HTTP {}: {}", status, body));
+    }
+
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| {
+            let _ = app_handle.emit("voice-state", serde_json::json!({ "state": "idle" }));
+            format!("Invalid response: {}", e)
+        })?;
+
+    let transcription = body["transcription"].as_str().unwrap_or("").to_string();
+    let content = body["content"].as_str().unwrap_or("").to_string();
+    log::info!("Jarvis: user said '{}', AI replied '{}'",
+        transcription.chars().take(50).collect::<String>(),
+        content.chars().take(50).collect::<String>());
+
+    // Step 3: Play TTS audio response if available
+    if let Some(tts_audio) = body["ttsAudio"].as_str() {
+        if let Ok(audio_bytes) = base64::engine::general_purpose::STANDARD.decode(tts_audio) {
+            log::info!("Jarvis: playing TTS response ({} bytes)", audio_bytes.len());
+            // Emit: SPEAKING
+            let _ = app_handle.emit("voice-state", serde_json::json!({ "state": "speaking" }));
+            if let Err(e) = crate::voice::play_audio_bytes(&audio_bytes) {
+                log::error!("Jarvis: TTS playback failed: {}", e);
+            }
+        }
+    }
+
+    // Emit: IDLE
+    let _ = app_handle.emit("voice-state", serde_json::json!({ "state": "idle" }));
+
+    Ok(body)
+}
+
+/// Play base64-encoded audio through speakers (for TTS responses)
+#[tauri::command]
+pub async fn play_tts(audio_base64: String) -> Result<String, String> {
+    use base64::Engine as _;
+    let audio_bytes = base64::engine::general_purpose::STANDARD
+        .decode(&audio_base64)
+        .map_err(|e| format!("Base64 decode error: {}", e))?;
+    crate::voice::play_audio_bytes(&audio_bytes)?;
+    Ok("Audio played".into())
 }
 
 /// Delete stored credentials (disconnect)
@@ -172,10 +413,58 @@ pub async fn voice_speak(text: String) -> Result<String, String> {
 
     let engine = VoiceEngine::new();
     engine
-        .speak(&creds.gateway_url, &creds.jwt_token, &text)
+        .speak(&creds.gateway_url, &creds.companion_id, &text)
         .await?;
 
     Ok("Speech played".into())
+}
+
+/// Read a screenshot and return it as a base64 data URL.
+/// Strategy: try local file first (fast), then fall back to Gateway HTTP (remote VPS).
+#[tauri::command]
+pub async fn read_screenshot(path: String, gateway_url: Option<String>) -> Result<String, String> {
+    let ext = path.rsplit('.').next().unwrap_or("png").to_lowercase();
+    let mime = match ext.as_str() {
+        "jpg" | "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        "gif" => "image/gif",
+        _ => "image/png",
+    };
+
+    // 1) Try local file first (works when Gateway runs on same machine)
+    if let Ok(data) = tokio::fs::read(&path).await {
+        log::info!("Screenshot loaded locally: {}", path);
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
+        return Ok(format!("data:{};base64,{}", mime, b64));
+    }
+
+    // 2) Fallback: fetch from Gateway HTTP endpoint (works for remote VPS)
+    if let Some(gw_url) = gateway_url {
+        let normalized = path.replace("\\\\", "/").replace('\\', "/");
+        if let Some(idx) = normalized.find(".forgeai/") {
+            let rel_path = &normalized[idx + 9..]; // after ".forgeai/"
+            let url = format!("{}/api/files/{}", gw_url.trim_end_matches('/'), rel_path);
+            log::info!("Screenshot not local, fetching from Gateway: {}", url);
+
+            let client = reqwest::Client::new();
+            let resp = client
+                .get(&url)
+                .timeout(std::time::Duration::from_secs(15))
+                .send()
+                .await
+                .map_err(|e| format!("Gateway fetch failed: {}", e))?;
+
+            if resp.status().is_success() {
+                let bytes = resp.bytes().await.map_err(|e| format!("Read bytes failed: {}", e))?;
+                let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+                return Ok(format!("data:{};base64,{}", mime, b64));
+            } else {
+                return Err(format!("Gateway returned {}: {}", resp.status(), url));
+            }
+        }
+    }
+
+    Err(format!("Screenshot not found locally or via Gateway: {}", path))
 }
 
 /// List available audio input/output devices
