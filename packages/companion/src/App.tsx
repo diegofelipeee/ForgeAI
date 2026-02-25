@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Flame, Send, Settings, X, Minus, Square, Link, Key, ArrowRight, Mic, MicOff, Volume2, Download, ZoomIn } from 'lucide-react';
+import { Flame, Send, Settings, X, Minus, Square, Link, Key, ArrowRight, Mic, MicOff, Volume2, Download, ZoomIn, MessageSquare, Plus, Clock, Trash2 } from 'lucide-react';
 
 // Tauri API
 declare global {
@@ -123,6 +123,11 @@ export default function App() {
   // Real-time agent progress via WebSocket
   const [agentProgress, setAgentProgress] = useState<{ tool?: string; status?: string } | null>(null);
   const [stepsExpanded, setStepsExpanded] = useState<Record<number, boolean>>({});
+  // Session history state
+  const [sessions, setSessions] = useState<Array<{ id: string; title: string; messageCount: number; updatedAt: string; lastMessage?: string }>>([]);
+  const [showSessions, setShowSessions] = useState(false);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const messagesEnd = useRef<HTMLDivElement>(null);
   const voiceModeRef = useRef(voiceMode);
@@ -184,6 +189,82 @@ export default function App() {
       else localStorage.removeItem('forgeai_session_id');
     } catch {}
   }, [sessionId]);
+
+  // Load session list from Gateway
+  const loadSessions = useCallback(async () => {
+    const gwUrl = status?.gateway_url || gatewayUrl;
+    if (!gwUrl) return;
+    setSessionsLoading(true);
+    try {
+      const resp = await fetch(`${gwUrl}/api/chat/sessions`);
+      const data = await resp.json();
+      if (data.sessions) {
+        setSessions(data.sessions.slice(0, 50));
+      }
+    } catch (err) {
+      console.error('[ForgeAI] Failed to load sessions:', err);
+    } finally {
+      setSessionsLoading(false);
+    }
+  }, [status?.gateway_url, gatewayUrl]);
+
+  // Load session history when selecting a session
+  const loadSessionHistory = useCallback(async (sid: string) => {
+    const gwUrl = status?.gateway_url || gatewayUrl;
+    if (!gwUrl) return;
+    setHistoryLoading(true);
+    try {
+      const resp = await fetch(`${gwUrl}/api/chat/history/${sid}`);
+      const data = await resp.json();
+      if (data.messages && Array.isArray(data.messages)) {
+        const mapped: ChatMessage[] = data.messages.map((m: any) => ({
+          role: m.role as 'user' | 'assistant' | 'system',
+          content: m.content || '',
+          timestamp: m.timestamp ? new Date(m.timestamp).getTime() : Date.now(),
+          steps: m.steps,
+        }));
+        setMessages(mapped);
+        setSessionId(sid);
+        setStepsExpanded({});
+      }
+    } catch (err) {
+      console.error('[ForgeAI] Failed to load history:', err);
+    } finally {
+      setHistoryLoading(false);
+      setShowSessions(false);
+    }
+  }, [status?.gateway_url, gatewayUrl]);
+
+  // Start a new session
+  const handleNewSession = useCallback(() => {
+    setSessionId(null);
+    setMessages([]);
+    setStepsExpanded({});
+    setAgentProgress(null);
+    setShowSessions(false);
+    try { localStorage.removeItem('forgeai_session_id'); } catch {}
+  }, []);
+
+  // Delete a session
+  const handleDeleteSession = useCallback(async (sid: string) => {
+    const gwUrl = status?.gateway_url || gatewayUrl;
+    if (!gwUrl) return;
+    try {
+      await fetch(`${gwUrl}/api/chat/sessions/${sid}`, { method: 'DELETE' });
+      setSessions(prev => prev.filter(s => s.id !== sid));
+      if (sessionId === sid) handleNewSession();
+    } catch (err) {
+      console.error('[ForgeAI] Failed to delete session:', err);
+    }
+  }, [status?.gateway_url, gatewayUrl, sessionId, handleNewSession]);
+
+  // Load last session history on connect
+  useEffect(() => {
+    if (status?.connected && sessionId) {
+      loadSessionHistory(sessionId);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status?.connected]);
 
   useEffect(() => {
     messagesEnd.current?.scrollIntoView({ behavior: 'smooth' });
@@ -673,9 +754,23 @@ export default function App() {
 
   // ─── Chat View ───
   return (
-    <div className="w-full h-full bg-zinc-950 flex flex-col overflow-hidden">
+    <div className="w-full h-full bg-zinc-950 flex flex-col overflow-hidden relative">
       {/* Header */}
       <TitleBar>
+        <button
+          onClick={() => { setShowSessions(!showSessions); if (!showSessions) loadSessions(); }}
+          className={`w-8 h-8 flex items-center justify-center hover:text-zinc-200 hover:bg-zinc-800 rounded transition-colors ${showSessions ? 'text-orange-400' : 'text-zinc-500'}`}
+          title="Chat History"
+        >
+          <MessageSquare className="w-4 h-4" />
+        </button>
+        <button
+          onClick={handleNewSession}
+          className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 rounded transition-colors"
+          title="New Chat"
+        >
+          <Plus className="w-4 h-4" />
+        </button>
         <button
           onClick={() => setView(view === 'settings' ? 'chat' : 'settings')}
           className="w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 rounded transition-colors"
@@ -684,6 +779,63 @@ export default function App() {
           <Settings className="w-4 h-4" />
         </button>
       </TitleBar>
+
+      {/* Session Sidebar */}
+      {showSessions && (
+        <div className="session-sidebar">
+          <div className="session-sidebar-header">
+            <span className="session-sidebar-title">Chat History</span>
+            <button onClick={() => setShowSessions(false)} className="session-sidebar-close" title="Close">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          {sessionsLoading ? (
+            <div className="session-sidebar-loading">Loading...</div>
+          ) : sessions.length === 0 ? (
+            <div className="session-sidebar-empty">No previous chats</div>
+          ) : (
+            <div className="session-sidebar-list">
+              {sessions.map((s) => (
+                <div
+                  key={s.id}
+                  className={`session-item ${sessionId === s.id ? 'session-item-active' : ''}`}
+                  onClick={() => loadSessionHistory(s.id)}
+                >
+                  <div className="session-item-content">
+                    <div className="session-item-preview">
+                      {s.title || s.lastMessage || s.id.slice(0, 20) + '...'}
+                    </div>
+                    <div className="session-item-meta">
+                      <Clock className="w-3 h-3" />
+                      <span>{new Date(s.updatedAt).toLocaleDateString()}</span>
+                      <span className="session-item-count">{s.messageCount} msgs</span>
+                    </div>
+                  </div>
+                  <button
+                    className="session-item-delete"
+                    title="Delete session"
+                    onClick={(e) => { e.stopPropagation(); handleDeleteSession(s.id); }}
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* History loading overlay */}
+      {historyLoading && (
+        <div className="session-loading-overlay">
+          <div className="loading-dots">
+            <div className="loading-dot" />
+            <div className="loading-dot" />
+            <div className="loading-dot" />
+          </div>
+          <span className="session-loading-text">Loading conversation...</span>
+        </div>
+      )}
 
       {/* Settings View */}
       {view === 'settings' && (
