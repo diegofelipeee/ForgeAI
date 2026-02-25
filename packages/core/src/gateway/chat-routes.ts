@@ -1467,6 +1467,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault): P
         usage: result.usage,
         duration: result.duration,
         sessionId,
+        steps: result.steps,
         ttsAudio,
         ttsFormat,
       };

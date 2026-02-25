@@ -155,11 +155,27 @@ Write-Output "TYPED: ${text.substring(0, 60).replace(/"/g, "'")}"
 
 function psScript_screenshot(outputPath: string, windowTitle?: string): string {
   if (windowTitle) {
+    // Use PrintWindow Win32 API to capture window content in BACKGROUND
+    // without bringing it to foreground or stealing focus
     return `
 ${PS_HELPERS}
-Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
-$found = $false
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+using System.Drawing;
+public class PrintWinAPI {
+    [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr hWnd, IntPtr hdcBlt, uint nFlags);
+    [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+    [DllImport("gdi32.dll")] public static extern IntPtr CreateCompatibleDC(IntPtr hdc);
+    [DllImport("gdi32.dll")] public static extern IntPtr CreateCompatibleBitmap(IntPtr hdc, int nWidth, int nHeight);
+    [DllImport("gdi32.dll")] public static extern IntPtr SelectObject(IntPtr hdc, IntPtr hgdiobj);
+    [DllImport("gdi32.dll")] public static extern bool DeleteDC(IntPtr hdc);
+    [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr hObject);
+}
+"@
+$script:found = $false
 [WinAPI]::EnumWindows({
     param($hWnd, $lParam)
     if ([WinAPI]::IsWindowVisible($hWnd)) {
@@ -170,25 +186,33 @@ $found = $false
             $w = $rect.Right - $rect.Left
             $h = $rect.Bottom - $rect.Top
             if ($w -gt 0 -and $h -gt 0) {
-                $bmp = New-Object System.Drawing.Bitmap($w, $h)
-                $g = [System.Drawing.Graphics]::FromImage($bmp)
-                $g.CopyFromScreen($rect.Left, $rect.Top, 0, 0, [System.Drawing.Size]::new($w, $h))
+                # PrintWindow captures in background without focus change
+                $hdcSrc = [PrintWinAPI]::GetDC($hWnd)
+                $hdcMem = [PrintWinAPI]::CreateCompatibleDC($hdcSrc)
+                $hBmp = [PrintWinAPI]::CreateCompatibleBitmap($hdcSrc, $w, $h)
+                $hOld = [PrintWinAPI]::SelectObject($hdcMem, $hBmp)
+                # PW_RENDERFULLCONTENT = 2 for modern apps
+                [PrintWinAPI]::PrintWindow($hWnd, $hdcMem, 2) | Out-Null
+                [PrintWinAPI]::SelectObject($hdcMem, $hOld) | Out-Null
+                $bmp = [System.Drawing.Image]::FromHbitmap($hBmp)
                 $bmp.Save("${outputPath.replace(/\\/g, '\\\\')}")
-                $g.Dispose()
                 $bmp.Dispose()
+                [PrintWinAPI]::DeleteObject($hBmp) | Out-Null
+                [PrintWinAPI]::DeleteDC($hdcMem) | Out-Null
+                [PrintWinAPI]::ReleaseDC($hWnd, $hdcSrc) | Out-Null
                 $script:found = $true
-                Write-Output "SCREENSHOT: ${outputPath.replace(/\\/g, '\\\\')} ($w x $h)"
+                Write-Output "SCREENSHOT_BG: ${outputPath.replace(/\\/g, '\\\\')} ($w x $h) [background capture]"
             }
             return $false
         }
     }
     return $true
 }, [IntPtr]::Zero) | Out-Null
-if (-not $found) { Write-Output "NOT_FOUND: No window matching '*${windowTitle.replace(/'/g, "''")}*'" }
+if (-not $script:found) { Write-Output "NOT_FOUND: No window matching '*${windowTitle.replace(/'/g, "''")}*'" }
 `;
   }
 
-  // Full screen screenshot
+  // Full screen screenshot (always uses CopyFromScreen)
   return `
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -242,27 +266,34 @@ $null = [Windows.Storage.StorageFile, Windows.Foundation, ContentType = WindowsR
 
 $asTaskGeneric = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation\`1' })[0]
 Function AwaitOp($WinRtTask, $ResultType) {
+    if ($null -eq $WinRtTask) { throw "WinRT async operation returned null" }
     $asTask = $asTaskGeneric.MakeGenericMethod($ResultType)
     $netTask = $asTask.Invoke($null, @($WinRtTask))
-    $netTask.Wait(-1) | Out-Null
+    if (-not $netTask.Wait(20000)) { throw "WinRT operation timed out after 20s" }
+    if ($netTask.IsFaulted) { throw $netTask.Exception.InnerException }
     $netTask.Result
 }
 
+$stream = $null
 try {
     $file = AwaitOp ([Windows.Storage.StorageFile]::GetFileFromPathAsync('${safe}')) ([Windows.Storage.StorageFile])
     $stream = AwaitOp ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])
     $decoder = AwaitOp ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
     $bitmap = AwaitOp ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
     $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
+    if ($null -eq $engine) {
+        $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage([Windows.Globalization.Language]::new("en-US"))
+    }
     if ($engine) {
         $ocrResult = AwaitOp ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult])
         Write-Output $ocrResult.Text
     } else {
-        Write-Output "OCR_ERROR: No OCR engine available"
+        Write-Output "OCR_ERROR: No OCR engine available. Install a language pack in Windows Settings > Language."
     }
-    $stream.Dispose()
 } catch {
     Write-Output "OCR_ERROR: $($_.Exception.Message)"
+} finally {
+    if ($stream) { try { $stream.Dispose() } catch {} }
 }
 `;
 }
@@ -546,34 +577,38 @@ export class DesktopAutomationTool extends BaseTool {
     description: `Interact with desktop applications and the OS GUI. Can open apps, focus windows, send keystrokes, type text, click mouse, take screenshots, READ screen content via OCR, read window text via UI Automation, and wait.
 Use this to automate ANY application: WhatsApp, Telegram, Notepad, browsers, Spotify, Discord, VS Code, Excel, etc.
 
+SAFE/BACKGROUND MODE (default for reading):
+- screenshot and read_screen capture windows IN THE BACKGROUND using PrintWindow API — the user's screen is NOT affected, no window pops up or steals focus.
+- You can read Discord, WhatsApp, or any app without the user noticing.
+- Only use focus_window when you NEED to type or send keys (input requires focus).
+
 KEY CAPABILITIES:
-- read_screen: Takes a screenshot AND runs OCR to extract all visible text. Returns {screenshot, text}. USE THIS to see what is on screen.
-- read_window_text: Uses UI Automation to read text elements from a window directly (faster than OCR, works for native apps).
-- screenshot: Takes a screenshot only (no OCR). Use read_screen instead when you need to read content.
+- read_screen: Takes a BACKGROUND screenshot of a window AND runs OCR to extract all visible text. Returns {screenshot, text}. The user will NOT see any window change. USE THIS to see what is on screen.
+- read_window_text: Uses UI Automation to read text elements from a window directly (faster than OCR, no screenshot needed, works for native apps). Also background — no focus change.
+- screenshot: Takes a BACKGROUND screenshot of a window only (no OCR). Use read_screen instead when you need to read content.
+- list_windows: Lists all open windows with titles and processes. Use to find the right window.
 
-WORKFLOW for reading and responding in apps like WhatsApp:
-1. focus_window target=WhatsApp
-2. read_screen target=WhatsApp → OCR reads all visible text (messages, contacts, UI elements)
-3. Analyze the OCR text to understand what is on screen
-4. Use keyboard shortcuts to navigate and respond
+WORKFLOW for READING info (safe/background — user sees nothing):
+1. desktop action=list_windows → find the window title
+2. desktop action=read_screen target=Discord → OCR reads all visible text in background
+3. Analyze the OCR text and report to user
+(No focus_window needed! The user's screen stays unchanged.)
 
-WhatsApp Desktop workflow (FOLLOW THIS EXACTLY):
-1. desktop action=focus_window target=WhatsApp
-2. desktop action=wait target=500
-3. desktop action=read_screen target=WhatsApp → READ what is visible
-4. desktop action=send_keys text=^k → open search (Ctrl+K)
-5. desktop action=wait target=500
-6. desktop action=type_text text=ContactName
+WORKFLOW for TYPING/INTERACTING (requires focus):
+1. desktop action=read_screen target=WhatsApp → read in background first
+2. desktop action=focus_window target=WhatsApp → only now bring to front
+3. desktop action=send_keys text=^k → open search
+4. desktop action=wait target=500
+5. desktop action=type_text text=ContactName
+6. desktop action=send_keys text={ENTER}
 7. desktop action=wait target=1000
-8. desktop action=send_keys text={ENTER} → select first result
-9. desktop action=wait target=1000
-10. desktop action=read_screen target=WhatsApp → READ messages in the conversation
-11. desktop action=type_text text=Your reply here
-12. desktop action=send_keys text={ENTER} → send
+8. desktop action=type_text text=Your reply here
+9. desktop action=send_keys text={ENTER} → send
 
 General tips:
-- ALWAYS use read_screen to see what is on screen before and after actions
-- Always focus_window BEFORE sending keys
+- For READING only: use read_screen or read_window_text — NO focus_window needed, it runs in background
+- For TYPING/CLICKING: focus_window first, then send_keys/type_text/click
+- ALWAYS use read_screen to verify what happened after actions
 - Use wait between steps (apps need time to respond)
 - Common shortcuts: ^c=Ctrl+C, ^v=Ctrl+V, ^a=Ctrl+A, ^k=search, %{F4}=Alt+F4, {TAB}, {ENTER}, {ESC}
 - For wait action: pass the ms value in target param (e.g. target=1000)`,

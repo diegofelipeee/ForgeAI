@@ -129,11 +129,17 @@ fn run_detection_loop(
         device.name().unwrap_or_default()
     );
 
+    // Use device's default config instead of forcing 16kHz mono
+    let supported = device
+        .default_input_config()
+        .map_err(|e| format!("No supported input config: {}", e))?;
+
     let config = cpal::StreamConfig {
-        channels: 1,
-        sample_rate: cpal::SampleRate(16000),
+        channels: supported.channels(),
+        sample_rate: supported.sample_rate(),
         buffer_size: cpal::BufferSize::Default,
     };
+    let native_channels = supported.channels() as usize;
 
     let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<f32>>(16);
 
@@ -169,8 +175,16 @@ fn run_detection_loop(
     while running.load(Ordering::Relaxed) {
         match rx.recv_timeout(std::time::Duration::from_millis(100)) {
             Ok(samples) => {
-                let rms: f32 = (samples.iter().map(|s| s * s).sum::<f32>()
-                    / samples.len().max(1) as f32)
+                // Downmix to mono if multi-channel
+                let mono: Vec<f32> = if native_channels > 1 {
+                    samples.chunks(native_channels)
+                        .map(|ch| ch.iter().sum::<f32>() / native_channels as f32)
+                        .collect()
+                } else {
+                    samples.clone()
+                };
+                let rms: f32 = (mono.iter().map(|s| s * s).sum::<f32>()
+                    / mono.len().max(1) as f32)
                     .sqrt();
 
                 if rms > energy_threshold {

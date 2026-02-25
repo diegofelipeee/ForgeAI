@@ -72,30 +72,71 @@ impl GatewayConnection {
         self.state.lock().await.clone()
     }
 
-    /// Save credentials to Windows Credential Manager
+    /// Get the file path for credential storage fallback
+    fn creds_file_path() -> Option<std::path::PathBuf> {
+        dirs::data_local_dir().map(|d| d.join("forgeai-companion").join("credentials.json"))
+    }
+
+    /// Save credentials to Windows Credential Manager + file fallback
     pub fn save_credentials(creds: &CompanionCredentials) -> Result<(), String> {
-        let entry = keyring::Entry::new("forgeai-companion", "credentials")
-            .map_err(|e| format!("Keyring error: {}", e))?;
         let json = serde_json::to_string(creds).map_err(|e| format!("Serialize error: {}", e))?;
-        entry
-            .set_password(&json)
-            .map_err(|e| format!("Save error: {}", e))
+
+        // Try keyring first
+        if let Ok(entry) = keyring::Entry::new("forgeai-companion", "credentials") {
+            let _ = entry.set_password(&json);
+        }
+
+        // Always save to file as fallback
+        if let Some(path) = Self::creds_file_path() {
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            std::fs::write(&path, &json)
+                .map_err(|e| format!("File save error: {}", e))?;
+            log::info!("Credentials saved to {}", path.display());
+        }
+
+        Ok(())
     }
 
-    /// Load credentials from Windows Credential Manager
+    /// Load credentials from Windows Credential Manager, fallback to file
     pub fn load_credentials() -> Option<CompanionCredentials> {
-        let entry = keyring::Entry::new("forgeai-companion", "credentials").ok()?;
-        let json = entry.get_password().ok()?;
-        serde_json::from_str(&json).ok()
+        // Try keyring first
+        if let Ok(entry) = keyring::Entry::new("forgeai-companion", "credentials") {
+            if let Ok(json) = entry.get_password() {
+                if let Ok(creds) = serde_json::from_str::<CompanionCredentials>(&json) {
+                    return Some(creds);
+                }
+            }
+        }
+
+        // Fallback to file
+        if let Some(path) = Self::creds_file_path() {
+            if let Ok(json) = std::fs::read_to_string(&path) {
+                if let Ok(creds) = serde_json::from_str::<CompanionCredentials>(&json) {
+                    log::info!("Credentials loaded from file fallback");
+                    return Some(creds);
+                }
+            }
+        }
+
+        log::warn!("No credentials found in keyring or file");
+        None
     }
 
-    /// Delete stored credentials
+    /// Delete stored credentials from both keyring and file
     pub fn delete_credentials() -> Result<(), String> {
-        let entry = keyring::Entry::new("forgeai-companion", "credentials")
-            .map_err(|e| format!("Keyring error: {}", e))?;
-        entry
-            .delete_credential()
-            .map_err(|e| format!("Delete error: {}", e))
+        // Try keyring
+        if let Ok(entry) = keyring::Entry::new("forgeai-companion", "credentials") {
+            let _ = entry.delete_credential();
+        }
+
+        // Delete file
+        if let Some(path) = Self::creds_file_path() {
+            let _ = std::fs::remove_file(&path);
+        }
+
+        Ok(())
     }
 
     /// Pair with Gateway using a pairing code from the Dashboard

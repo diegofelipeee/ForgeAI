@@ -28,6 +28,14 @@ fn main() {
         .manage(commands::VoiceState(std::sync::Mutex::new(
             voice::VoiceEngine::new(),
         )))
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            // Second instance tried to launch — focus existing window instead
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
@@ -41,6 +49,13 @@ fn main() {
             commands::get_safety_prompt,
             commands::get_status,
             commands::pair_with_gateway,
+            commands::chat_send,
+            commands::chat_voice,
+            commands::play_tts,
+            commands::window_start_drag,
+            commands::window_minimize,
+            commands::window_hide,
+            commands::window_maximize,
             commands::disconnect,
             commands::get_system_info,
             commands::wake_word_start,
@@ -50,6 +65,7 @@ fn main() {
             commands::voice_record,
             commands::voice_stop,
             commands::voice_speak,
+            commands::read_screenshot,
             commands::list_audio_devices,
         ])
         .setup(|app| {

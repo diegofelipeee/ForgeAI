@@ -67,6 +67,7 @@ export class PuppeteerBrowserTool extends BaseTool {
         '--disable-gpu',
         '--no-first-run',
         '--no-zygote',
+        '--headless=new',
         '--disable-blink-features=AutomationControlled',
         `--user-agent=${STEALTH_UA}`,
         '--lang=pt-BR,pt,en-US,en',
@@ -75,7 +76,7 @@ export class PuppeteerBrowserTool extends BaseTool {
       // Try Puppeteer bundled Chrome first
       try {
         this.browser = await puppeteer.launch({
-          headless: 'shell',
+          headless: true,
           userDataDir: profileDir,
           args: launchArgs,
         });
@@ -86,7 +87,7 @@ export class PuppeteerBrowserTool extends BaseTool {
           const systemChrome = this.findSystemChrome();
           if (systemChrome) {
             this.browser = await puppeteer.launch({
-              headless: 'shell',
+              headless: true,
               executablePath: systemChrome,
               userDataDir: profileDir,
               args: launchArgs,
