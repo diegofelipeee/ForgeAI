@@ -68,6 +68,13 @@ function compactToolResult(toolName: string, data: unknown, success: boolean, er
       if (obj['screenshot'] && obj['text']) {
         return `screenshot=${obj['screenshot']}\ntext:${(obj['text'] as string).substring(0, MAX_RESULT_CHARS)}`;
       }
+      // Companion-delegated screenshot: image already saved on server
+      if (obj['path'] && obj['filename']) {
+        return `screenshot_saved path=${obj['path']} filename=${obj['filename']}\nThe screenshot was captured successfully from the user's Windows machine and saved. The image will be displayed automatically in the chat. Do NOT try to read or verify this file with file_manager.`;
+      }
+      if (obj['output'] && typeof obj['output'] === 'string') {
+        return (obj['output'] as string).substring(0, MAX_RESULT_CHARS);
+      }
     }
 
     // web_browse: truncate content

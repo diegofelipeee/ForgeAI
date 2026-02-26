@@ -1456,6 +1456,19 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
       logger.info('Voice chat: STT complete', { text: sttResult.text.substring(0, 100), confidence: sttResult.confidence });
 
       // Step 2: Process message through agent
+      // For voice from Companion: swap tool executor to delegate local actions to Companion via WS
+      const voiceTargetAgent = body.agentId ? agentManager.getAgent(body.agentId) : agentManager.getDefaultAgent();
+      let voiceOriginalExecutor: unknown;
+      if (voiceTargetAgent && toolRegistry) {
+        const bridge = getCompanionBridge();
+        if (bridge.isConnected(userId)) {
+          voiceOriginalExecutor = (voiceTargetAgent as any).toolExecutor;
+          const companionExecutor = new CompanionToolExecutor(toolRegistry, bridge, userId);
+          voiceTargetAgent.setToolExecutor(companionExecutor);
+          logger.info('Companion tool executor active for voice', { userId, sessionId });
+        }
+      }
+
       const result = await agentManager.processMessage({
         sessionId,
         userId,
@@ -1463,6 +1476,11 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
         channelType: 'voice',
         agentId: body.agentId,
       });
+
+      // Restore original tool executor after voice message processing
+      if (voiceOriginalExecutor && voiceTargetAgent) {
+        voiceTargetAgent.setToolExecutor(voiceOriginalExecutor as any);
+      }
 
       // Step 3: Optional TTS — synthesize response to audio
       let ttsAudio: string | undefined;
