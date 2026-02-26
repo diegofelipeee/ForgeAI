@@ -16,6 +16,7 @@ import {
 import { registerChatRoutes, getTelegramChannel } from './chat-routes.js';
 import { registerConfigSyncRoutes } from './config-sync.js';
 import { getWSBroadcaster } from './ws-broadcaster.js';
+import { getCompanionBridge } from './companion-bridge.js';
 import {
   createJWTAuth,
   createRBACEngine,
@@ -2252,9 +2253,18 @@ document.getElementById('smtp-user').addEventListener('input', function() {
 
   private registerWSRoutes(): void {
     const broadcaster = getWSBroadcaster();
+    const companionBridge = getCompanionBridge();
 
-    this.app.get('/ws', { websocket: true }, (socket, _request) => {
+    this.app.get('/ws', { websocket: true }, (socket, request) => {
       const client = broadcaster.addClient(socket as any);
+
+      // Track Companion connections by companionId query param
+      const url = new URL(request.url || '', `http://${request.headers.host || 'localhost'}`);
+      const companionId = url.searchParams.get('companionId') || '';
+      if (companionId) {
+        companionBridge.registerCompanion(companionId, socket);
+        logger.info('Companion WS connected', { companionId });
+      }
 
       socket.on('message', (raw: Buffer) => {
         try {
@@ -2288,6 +2298,16 @@ document.getElementById('smtp-user').addEventListener('input', function() {
               }
               break;
 
+            // Companion sends back action execution results
+            case 'action_result':
+              if (message.requestId) {
+                companionBridge.handleActionResult(message.requestId, {
+                  success: !!message.success,
+                  output: message.output || '',
+                });
+              }
+              break;
+
             default:
               socket.send(JSON.stringify({
                 type: 'error',
@@ -2308,6 +2328,9 @@ document.getElementById('smtp-user').addEventListener('input', function() {
 
       socket.on('close', () => {
         broadcaster.removeClient(client);
+        if (companionId) {
+          companionBridge.unregisterCompanion(companionId);
+        }
       });
     });
   }
