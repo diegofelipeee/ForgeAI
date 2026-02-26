@@ -70,6 +70,7 @@ fn main() {
             commands::get_session_history,
             commands::delete_session,
             commands::list_audio_devices,
+            commands::connect_gateway_ws,
         ])
         .setup(|app| {
             // ─── System Tray ───
@@ -116,6 +117,9 @@ fn main() {
                 .build(app)?;
 
             log::info!("ForgeAI Companion started — system tray active");
+
+            // Auto-connect Gateway WS if credentials exist
+            commands::spawn_gateway_ws();
 
             Ok(())
         })
