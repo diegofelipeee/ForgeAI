@@ -6,6 +6,7 @@ import { getWSBroadcaster } from './ws-broadcaster.js';
 import { WebChatChannel, TeamsChannel, createTeamsChannel, TelegramChannel, createTelegramChannel, WhatsAppChannel, createWhatsAppChannel, GoogleChatChannel, createGoogleChatChannel, NodeChannel, createNodeChannel } from '@forgeai/channels';
 import { createDefaultToolRegistry, type ToolRegistry, createSandboxManager, type SandboxManager, setAgentManagerRef, CronSchedulerTool } from '@forgeai/tools';
 import { createAdvancedRateLimiter, type AdvancedRateLimiter, createIPFilter, type IPFilter, type Vault, type JWTAuth } from '@forgeai/security';
+import { getCompanionBridge, CompanionToolExecutor } from './companion-bridge.js';
 import { createTailscaleHelper, type TailscaleHelper } from '../remote/tailscale-helper.js';
 import { createPluginManager, AutoResponderPlugin, ContentFilterPlugin, ChatCommandsPlugin, type PluginManager, createPluginSDK, type PluginSDK } from '@forgeai/plugins';
 import { createVoiceEngine, type VoiceEngine, createMCPClient, type MCPClient, createMemoryManager, type MemoryManager, createRAGEngine, type RAGEngine, extractTextFromFile, createAutoPlanner, type AutoPlanner, createWakeWordManager, type WakeWordManager } from '@forgeai/agent';
@@ -1337,6 +1338,18 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
         targetAgent.onProgress(sessionId, progressListener as any);
       }
 
+      // For companion channel: swap tool executor to delegate local actions to Companion via WS
+      let originalExecutor: unknown;
+      if (channelType === 'companion' && targetAgent && toolRegistry) {
+        const bridge = getCompanionBridge();
+        if (bridge.isConnected(userId)) {
+          originalExecutor = (targetAgent as any).toolExecutor;
+          const companionExecutor = new CompanionToolExecutor(toolRegistry, bridge, userId);
+          targetAgent.setToolExecutor(companionExecutor);
+          logger.info('Companion tool executor active', { userId, sessionId });
+        }
+      }
+
       const result = await agentManager.processMessage({
         sessionId,
         userId,
@@ -1347,6 +1360,11 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
         modelOverride: body.model,
         providerOverride: body.provider,
       });
+
+      // Restore original tool executor after companion message processing
+      if (originalExecutor && targetAgent) {
+        targetAgent.setToolExecutor(originalExecutor as any);
+      }
 
       // Clean up progress listener
       if (targetAgent) {

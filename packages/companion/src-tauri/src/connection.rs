@@ -225,6 +225,7 @@ impl GatewayConnection {
 
         // Outgoing channel
         let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+        let action_tx = tx.clone(); // Clone before moving tx into self
         self.outgoing_tx = Some(tx);
 
         // Send task — forwards outgoing messages to WebSocket
@@ -236,7 +237,7 @@ impl GatewayConnection {
             }
         });
 
-        // Receive task — forwards incoming messages to app
+        // Receive task — forwards incoming messages to app + handles action requests
         let incoming_tx = self.incoming_tx.clone();
         let state = self.state.clone();
 
@@ -244,6 +245,46 @@ impl GatewayConnection {
             while let Some(Ok(msg)) = read.next().await {
                 match msg {
                     Message::Text(text) => {
+                        // Try to parse as a raw JSON value first to check type
+                        if let Ok(raw) = serde_json::from_str::<serde_json::Value>(&text) {
+                            if raw.get("type").and_then(|t| t.as_str()) == Some("action_request") {
+                                // Handle action request from Gateway agent
+                                let request_id = raw.get("requestId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                let action = raw.get("action").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                let params = raw.get("params").cloned().unwrap_or(serde_json::json!({}));
+
+                                log::info!("Action request from Gateway: {} ({})", action, request_id);
+
+                                // Build ActionRequest from the params
+                                let action_req = crate::local_actions::ActionRequest {
+                                    action: action.clone(),
+                                    path: params.get("path").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                                    command: params.get("command").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                                    content: params.get("content").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                                    process_name: params.get("process_name").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                                    app_name: params.get("app_name").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                                    confirmed: true, // Agent-initiated actions are pre-confirmed
+                                };
+
+                                // Execute locally on Windows
+                                let result = crate::local_actions::execute(&action_req);
+                                log::info!("Action result: {} success={}", action, result.success);
+
+                                // Send result back via WebSocket
+                                let response = serde_json::json!({
+                                    "type": "action_result",
+                                    "requestId": request_id,
+                                    "success": result.success,
+                                    "output": result.output,
+                                });
+                                if let Ok(json) = serde_json::to_string(&response) {
+                                    let _ = action_tx.send(json);
+                                }
+                                continue;
+                            }
+                        }
+
+                        // Normal message — forward to app
                         if let Ok(gateway_msg) =
                             serde_json::from_str::<GatewayMessage>(&text)
                         {
