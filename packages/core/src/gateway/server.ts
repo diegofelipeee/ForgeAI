@@ -2259,8 +2259,8 @@ document.getElementById('smtp-user').addEventListener('input', function() {
       const client = broadcaster.addClient(socket as any);
 
       // Track Companion connections by companionId query param
-      const url = new URL(request.url || '', `http://${request.headers.host || 'localhost'}`);
-      const companionId = url.searchParams.get('companionId') || '';
+      const query = (request.query || {}) as Record<string, string>;
+      const companionId = query.companionId || '';
       if (companionId) {
         companionBridge.registerCompanion(companionId, socket);
         logger.info('Companion WS connected', { companionId });

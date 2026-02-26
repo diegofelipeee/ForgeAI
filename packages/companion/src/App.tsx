@@ -269,10 +269,11 @@ export default function App() {
     messagesEnd.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // WebSocket connection for real-time agent progress
+  // WebSocket connection — connects immediately when gateway_url is available
+  // This ensures the CompanionBridge is registered BEFORE any chat message is sent
   useEffect(() => {
     const gwUrl = status?.gateway_url;
-    if (!gwUrl || !sessionId) return;
+    if (!gwUrl) return;
 
     const companionId = status?.companion_id || '';
     const wsUrl = gwUrl.replace(/^http/, 'ws') + '/ws' + (companionId ? `?companionId=${companionId}` : '');
@@ -286,7 +287,10 @@ export default function App() {
 
         ws.onopen = () => {
           console.log('[ForgeAI] WS connected', companionId ? `(companion: ${companionId})` : '');
-          ws.send(JSON.stringify({ type: 'session.subscribe', sessionId }));
+          // Subscribe to current session if available
+          if (sessionId) {
+            ws.send(JSON.stringify({ type: 'session.subscribe', sessionId }));
+          }
         };
 
         ws.onmessage = (ev) => {
@@ -360,7 +364,14 @@ export default function App() {
         wsRef.current = null;
       }
     };
-  }, [status?.gateway_url, status?.companion_id, sessionId]);
+  }, [status?.gateway_url, status?.companion_id]);
+
+  // Subscribe to session when sessionId changes (WS already connected)
+  useEffect(() => {
+    if (sessionId && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'session.subscribe', sessionId }));
+    }
+  }, [sessionId]);
 
   const loadStatus = async () => {
     try {
