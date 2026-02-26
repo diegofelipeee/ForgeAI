@@ -1242,6 +1242,8 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
   // ─── REST API: Chat ────────────────────────────────
 
   // POST /api/chat — send a message and get a response
+  // Supports streaming mode (stream:true or companion channel) to prevent HTTP timeouts
+  // on long agent runs. Sends periodic heartbeat newlines to keep the connection alive.
   app.post('/api/chat', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = request.body as {
       message?: string;
@@ -1251,6 +1253,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
       model?: string;
       provider?: string;
       channelType?: string;
+      stream?: boolean;
       image?: { data: string; mimeType: string; filename?: string };
     };
 
@@ -1267,6 +1270,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
     const sessionId = body.sessionId ?? generateId('sess');
     const userId = body.userId ?? 'webchat-user';
     const channelType = body.channelType || 'webchat';
+    const useStreaming = body.stream === true || channelType === 'companion';
 
     try {
       // ── Universal chat commands ──
@@ -1350,6 +1354,20 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
         }
       }
 
+      // Start heartbeat for streaming mode — sends a space every 10s to keep HTTP alive
+      let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+      if (useStreaming) {
+        reply.raw.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Transfer-Encoding': 'chunked',
+          'Cache-Control': 'no-cache',
+          'X-Streaming': 'true',
+        });
+        heartbeatTimer = setInterval(() => {
+          try { reply.raw.write(' '); } catch { /* connection closed */ }
+        }, 10_000);
+      }
+
       const result = await agentManager.processMessage({
         sessionId,
         userId,
@@ -1360,6 +1378,9 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
         modelOverride: body.model,
         providerOverride: body.provider,
       });
+
+      // Stop heartbeat
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
 
       // Restore original tool executor after companion message processing
       if (originalExecutor && targetAgent) {
@@ -1398,7 +1419,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
         timestamp: Date.now(),
       });
 
-      return {
+      const responseBody = {
         id: result.id,
         content: result.content,
         thinking: result.thinking,
@@ -1412,8 +1433,26 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
         steps: result.steps,
         toolIterations: result.toolIterations,
       };
+
+      // Streaming mode: write JSON to raw stream and end
+      if (useStreaming) {
+        try {
+          reply.raw.write(JSON.stringify(responseBody));
+          reply.raw.end();
+        } catch { /* connection already closed */ }
+        return;
+      }
+
+      return responseBody;
     } catch (error) {
       logger.error('Chat request failed', error);
+      if (useStreaming) {
+        try {
+          reply.raw.write(JSON.stringify({ error: 'Internal server error' }));
+          reply.raw.end();
+        } catch { /* connection already closed */ }
+        return;
+      }
       reply.status(500).send({ error: 'Internal server error' });
       return;
     }

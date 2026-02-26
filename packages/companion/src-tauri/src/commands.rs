@@ -180,7 +180,9 @@ pub fn window_maximize(window: tauri::Window) -> Result<(), String> {
     }
 }
 
-/// Send a chat message to the Gateway and get AI response
+/// Send a chat message to the Gateway and get AI response.
+/// Uses streaming mode: Gateway sends heartbeat spaces to keep connection alive
+/// during long agent runs, then the final JSON result at the end.
 #[tauri::command]
 pub async fn chat_send(message: String, session_id: Option<String>) -> Result<serde_json::Value, String> {
     let creds = crate::connection::GatewayConnection::load_credentials()
@@ -188,8 +190,10 @@ pub async fn chat_send(message: String, session_id: Option<String>) -> Result<se
 
     let url = format!("{}/api/chat", creds.gateway_url);
 
+    // No total timeout — Gateway sends heartbeat spaces every 10s to keep alive.
+    // Only connect_timeout to fail fast if server is unreachable.
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(300))
+        .connect_timeout(std::time::Duration::from_secs(15))
         .build()
         .map_err(|e| format!("HTTP client error: {}", e))?;
 
@@ -198,6 +202,7 @@ pub async fn chat_send(message: String, session_id: Option<String>) -> Result<se
         "sessionId": session_id,
         "userId": creds.companion_id,
         "channelType": "companion",
+        "stream": true,
     });
 
     let mut last_err = String::new();
@@ -227,10 +232,22 @@ pub async fn chat_send(message: String, session_id: Option<String>) -> Result<se
         return Err(format!("Gateway HTTP {}: {}", status, body));
     }
 
-    let body: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("Invalid response: {}", e))?;
+    // Response is streamed: heartbeat spaces followed by JSON.
+    // Read full body as text, trim leading spaces, then parse.
+    let raw = resp.text().await
+        .map_err(|e| format!("Failed to read response: {}", e))?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("Empty response from Gateway".into());
+    }
+
+    let body: serde_json::Value = serde_json::from_str(trimmed)
+        .map_err(|e| format!("Invalid JSON response: {}", e))?;
+
+    // Check for server-side error in response
+    if let Some(err) = body.get("error").and_then(|v| v.as_str()) {
+        return Err(format!("Gateway error: {}", err));
+    }
 
     Ok(body)
 }
