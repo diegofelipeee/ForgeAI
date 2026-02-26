@@ -405,64 +405,119 @@ async fn gateway_ws_loop() {
                 let send_handle = tokio::spawn(async move {
                     while let Some(msg) = rx.recv().await {
                         if write.send(Message::Text(msg.into())).await.is_err() {
+                            log::error!("[GatewayWS] Write failed, send task exiting");
                             break;
                         }
                     }
                 });
 
-                // Receive loop: handle incoming messages
-                while let Some(result) = read.next().await {
-                    match result {
-                        Ok(Message::Text(text)) => {
-                            let raw: serde_json::Value = match serde_json::from_str(&text) {
-                                Ok(v) => v,
-                                Err(_) => continue,
-                            };
-                            let msg_type = raw.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                // Keepalive ping interval (30s)
+                let mut ping_interval = tokio::time::interval(std::time::Duration::from_secs(30));
+                ping_interval.tick().await; // consume initial tick
 
-                            if msg_type == "action_request" {
-                                let request_id = raw.get("requestId")
-                                    .and_then(|v| v.as_str()).unwrap_or("").to_string();
-                                let action = raw.get("action")
-                                    .and_then(|v| v.as_str()).unwrap_or("").to_string();
-                                let params = raw.get("params")
-                                    .cloned().unwrap_or(serde_json::json!({}));
+                // Receive loop with keepalive
+                let mut alive = true;
+                while alive {
+                    tokio::select! {
+                        msg = read.next() => {
+                            match msg {
+                                Some(Ok(Message::Text(text))) => {
+                                    let text_str: String = text.to_string();
+                                    let raw: serde_json::Value = match serde_json::from_str(&text_str) {
+                                        Ok(v) => v,
+                                        Err(e) => {
+                                            log::warn!("[GatewayWS] JSON parse error: {}", e);
+                                            continue;
+                                        }
+                                    };
+                                    let msg_type = raw.get("type").and_then(|t| t.as_str()).unwrap_or("");
 
-                                log::info!("[GatewayWS] Action: {} (id={})", action, request_id);
+                                    match msg_type {
+                                        "action_request" => {
+                                            let request_id = raw.get("requestId")
+                                                .and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                            let action = raw.get("action")
+                                                .and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                            let params = raw.get("params")
+                                                .cloned().unwrap_or(serde_json::json!({}));
 
-                                let action_req = ActionRequest {
-                                    action: action.clone(),
-                                    path: params.get("path").and_then(|v| v.as_str()).map(String::from),
-                                    command: params.get("command").and_then(|v| v.as_str()).map(String::from),
-                                    content: params.get("content").and_then(|v| v.as_str()).map(String::from),
-                                    process_name: params.get("process_name").and_then(|v| v.as_str()).map(String::from),
-                                    app_name: params.get("app_name").and_then(|v| v.as_str()).map(String::from),
-                                    confirmed: true,
-                                };
+                                            log::info!("[GatewayWS] >>> Action request: {} (id={})", action, request_id);
 
-                                let result = local_actions::execute(&action_req);
-                                log::info!("[GatewayWS] Result: {} success={}", action, result.success);
+                                            // Execute in a blocking thread so we don't stall the async loop
+                                            let action_clone = action.clone();
+                                            let tx_clone = tx.clone();
+                                            let req_id = request_id.clone();
+                                            tokio::task::spawn_blocking(move || {
+                                                let action_req = ActionRequest {
+                                                    action: action_clone.clone(),
+                                                    path: params.get("path").and_then(|v| v.as_str()).map(String::from),
+                                                    command: params.get("command").and_then(|v| v.as_str()).map(String::from),
+                                                    content: params.get("content").and_then(|v| v.as_str()).map(String::from),
+                                                    process_name: params.get("process_name").and_then(|v| v.as_str()).map(String::from),
+                                                    app_name: params.get("app_name").and_then(|v| v.as_str()).map(String::from),
+                                                    confirmed: true,
+                                                };
 
-                                let response = serde_json::json!({
-                                    "type": "action_result",
-                                    "requestId": request_id,
-                                    "success": result.success,
-                                    "output": result.output,
-                                });
-                                if let Ok(json) = serde_json::to_string(&response) {
-                                    let _ = tx.send(json);
+                                                let result = local_actions::execute(&action_req);
+                                                log::info!("[GatewayWS] <<< Action result: {} success={} output_len={}",
+                                                    action_clone, result.success, result.output.len());
+
+                                                let response = serde_json::json!({
+                                                    "type": "action_result",
+                                                    "requestId": req_id,
+                                                    "success": result.success,
+                                                    "output": result.output,
+                                                });
+                                                if let Ok(json) = serde_json::to_string(&response) {
+                                                    if let Err(e) = tx_clone.send(json) {
+                                                        log::error!("[GatewayWS] Failed to queue response: {}", e);
+                                                    } else {
+                                                        log::info!("[GatewayWS] Response queued for {}", req_id);
+                                                    }
+                                                }
+                                            });
+                                        }
+                                        "health.pong" => {
+                                            log::debug!("[GatewayWS] Keepalive pong received");
+                                        }
+                                        _ => {
+                                            log::debug!("[GatewayWS] Received: {}", msg_type);
+                                        }
+                                    }
                                 }
+                                Some(Ok(Message::Ping(data))) => {
+                                    log::debug!("[GatewayWS] Ping frame received");
+                                    let pong = serde_json::json!({"type":"pong"}).to_string();
+                                    let _ = tx.send(pong);
+                                    let _ = data; // auto-pong handled by tungstenite
+                                }
+                                Some(Ok(Message::Close(_))) => {
+                                    log::warn!("[GatewayWS] Server closed connection");
+                                    alive = false;
+                                }
+                                Some(Err(e)) => {
+                                    log::error!("[GatewayWS] Read error: {}", e);
+                                    alive = false;
+                                }
+                                None => {
+                                    log::warn!("[GatewayWS] Stream ended");
+                                    alive = false;
+                                }
+                                _ => {}
                             }
                         }
-                        Ok(Message::Close(_)) => {
-                            log::warn!("[GatewayWS] Server closed connection");
-                            break;
+                        _ = ping_interval.tick() => {
+                            let ping = serde_json::json!({
+                                "type": "health.ping",
+                                "id": "keepalive",
+                            }).to_string();
+                            if tx.send(ping).is_err() {
+                                log::warn!("[GatewayWS] Ping send failed — connection dead");
+                                alive = false;
+                            } else {
+                                log::debug!("[GatewayWS] Keepalive ping sent");
+                            }
                         }
-                        Err(e) => {
-                            log::error!("[GatewayWS] Read error: {}", e);
-                            break;
-                        }
-                        _ => {}
                     }
                 }
 
