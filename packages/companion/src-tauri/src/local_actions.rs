@@ -672,6 +672,8 @@ Write-Output "CLICKED: ({x}, {y}) {button}"
 }
 
 fn desktop_screenshot(target: &str) -> ActionResult {
+    use base64::Engine;
+
     let dir = std::env::temp_dir().join("forgeai_screenshots");
     let _ = std::fs::create_dir_all(&dir);
     let filename = format!("screenshot_{}.png", std::time::SystemTime::now()
@@ -733,7 +735,30 @@ $script:found=$false
 if(-not $found) {{ Write-Output "NOT_FOUND: No window matching '*{safe}*'" }}
 "#, safe=safe, path=path_str)
     };
-    run_powershell(&script)
+
+    let ps_result = run_powershell(&script);
+    if !ps_result.success {
+        return ps_result;
+    }
+
+    // Read the PNG file and base64-encode it so the Gateway can save + display the image
+    let real_path = path.to_string_lossy().to_string();
+    match std::fs::read(&path) {
+        Ok(bytes) => {
+            let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+            let json_output = serde_json::json!({
+                "output": ps_result.output.trim(),
+                "filename": filename,
+                "image_base64": b64,
+            });
+            ActionResult::ok(json_output.to_string(), safe_verdict())
+        }
+        Err(e) => {
+            // File not found — return the PS output anyway
+            log::warn!("[desktop_screenshot] Could not read {}: {}", real_path, e);
+            ps_result
+        }
+    }
 }
 
 fn desktop_read_screen(target: &str) -> ActionResult {

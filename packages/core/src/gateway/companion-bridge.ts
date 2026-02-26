@@ -12,6 +12,8 @@
 
 import { createLogger, generateId } from '@forgeai/shared';
 import type { ToolExecutor } from '@forgeai/agent';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 const logger = createLogger('Core:CompanionBridge');
 
@@ -218,6 +220,37 @@ export class CompanionToolExecutor implements ToolExecutor {
       logger.info(`Delegating ${name} to Companion`, { companionId: this.companionId, action: mapped.action });
 
       const result = await this.bridge.requestAction(this.companionId, mapped.action, mapped.params);
+
+      // If the Companion sent back a screenshot with base64 image data, save it on the Gateway
+      let savedPath: string | undefined;
+      let savedFilename: string | undefined;
+      if (result.success && result.output) {
+        try {
+          const parsed = JSON.parse(result.output);
+          if (parsed.image_base64 && parsed.filename) {
+            const screenshotDir = resolve(process.cwd(), '.forgeai', 'screenshots');
+            if (!existsSync(screenshotDir)) mkdirSync(screenshotDir, { recursive: true });
+            savedFilename = parsed.filename;
+            savedPath = resolve(screenshotDir, savedFilename!);
+            writeFileSync(savedPath, Buffer.from(parsed.image_base64, 'base64'));
+            logger.info('Companion screenshot saved on Gateway', { path: savedPath });
+          }
+        } catch { /* not JSON or no image — that's fine */ }
+      }
+
+      // If we saved a screenshot, return in the same format the server-side DesktopAutomationTool uses
+      if (savedPath) {
+        return {
+          success: result.success,
+          data: {
+            output: 'Screenshot captured from Windows Companion',
+            path: savedPath,
+            filename: savedFilename,
+            delegatedTo: 'companion',
+          },
+          duration: 0,
+        };
+      }
 
       return {
         success: result.success,
