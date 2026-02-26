@@ -25,6 +25,7 @@ pub struct ActionRequest {
     pub content: Option<String>,
     pub process_name: Option<String>,
     pub app_name: Option<String>,
+    pub cwd: Option<String>,
     pub confirmed: bool,
 }
 
@@ -325,9 +326,15 @@ fn run_shell(req: &ActionRequest) -> ActionResult {
         return ActionResult::needs_confirm(verdict);
     }
 
-    let output = Command::new("cmd")
-        .args(["/C", command])
-        .output();
+    let mut cmd = Command::new("powershell.exe");
+    cmd.args(["-NoProfile", "-NonInteractive", "-Command", command]);
+    if let Some(cwd) = &req.cwd {
+        let cwd_path = std::path::Path::new(cwd);
+        if cwd_path.exists() {
+            cmd.current_dir(cwd_path);
+        }
+    }
+    let output = cmd.output();
 
     match output {
         Ok(out) => {

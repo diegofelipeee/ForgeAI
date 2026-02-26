@@ -159,14 +159,28 @@ export class CompanionBridge {
         };
 
       case 'file_manager': {
-        // file_manager tool has an 'operation' param that maps to local_actions
-        const op = String(params['operation'] || 'read_file');
+        // file_manager tool uses 'action' param: read, write, list, delete, mkdir, copy, move, exists, info, disk_info
+        // Map to Companion local_actions names
+        const fmAction = String(params['action'] || 'read');
+        const actionMap: Record<string, string> = {
+          read: 'read_file',
+          write: 'write_file',
+          list: 'list_dir',
+          delete: 'delete_file',
+          mkdir: 'create_dir',
+          exists: 'file_exists',
+          info: 'file_info',
+          copy: 'copy_file',
+          move: 'move_file',
+          disk_info: 'disk_usage',
+        };
+        // For copy/move, Companion uses req.content as the destination path
+        const isCopyMove = fmAction === 'copy' || fmAction === 'move';
         return {
-          action: op,
+          action: actionMap[fmAction] || fmAction,
           params: {
             path: params['path'],
-            content: params['content'],
-            destination: params['destination'],
+            content: isCopyMove ? params['dest'] : params['content'],
           },
         };
       }
@@ -201,6 +215,8 @@ export class CompanionToolExecutor implements ToolExecutor {
   private inner: ToolExecutor;
   private bridge: CompanionBridge;
   private companionId: string;
+  /** Tells the agent runtime that commands execute on Windows, not the Gateway's Linux */
+  readonly companionPlatform = 'win32';
 
   constructor(inner: ToolExecutor, bridge: CompanionBridge, companionId: string) {
     this.inner = inner;

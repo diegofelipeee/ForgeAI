@@ -308,7 +308,9 @@ export class AgentRuntime {
 
   private defaultSystemPrompt(): string {
     const hasTools = this.toolExecutor !== null;
-    const W = process.platform === 'win32';
+    // If tool executor is a CompanionToolExecutor, commands run on Windows, not the Gateway's Linux
+    const companionPlatform = (this.toolExecutor as any)?.companionPlatform as string | undefined;
+    const W = companionPlatform === 'win32' || process.platform === 'win32';
     const sh = W ? 'PowerShell' : 'Bash';
     const os = W ? 'Windows' : process.platform;
 
@@ -329,7 +331,15 @@ IMPORTANT: Only describe capabilities you actually have based on the tools liste
     if (!hasTools) return base;
 
     return base + `
-${envInfo}
+${envInfo}${companionPlatform ? `
+COMPANION MODE: shell_exec, file_manager, and desktop commands execute on the USER's WINDOWS machine (not a server).
+- Use ABSOLUTE Windows paths: C:\\Users\\USERNAME\\Desktop\\folder (discover username with $env:USERNAME or whoami)
+- The workspace .forgeai/workspace/ does NOT exist on the user's Windows. Use real Windows paths.
+- PowerShell is the shell. Use mkdir, New-Item, Set-Content, etc.
+- To create a folder on Desktop: shell_exec(command="New-Item -ItemType Directory -Path \\"$env:USERPROFILE\\Desktop\\MyFolder\\" -Force")
+- To write files: shell_exec(command="Set-Content -Path \\"$env:USERPROFILE\\Desktop\\file.txt\\" -Value \\"content\\"")
+- To start a local web server: shell_exec(command="Start-Process npx -ArgumentList 'http-server','-p','8080' -NoNewWindow", cwd="$env:USERPROFILE\\Desktop\\my-site")
+` : ''}
 Tools:
 shell_exec: run ${sh} cmds, timeout=60s (use 120000 for installs)
  DEFAULT CWD is .forgeai/workspace/ — do NOT use Set-Location/cd to .forgeai/workspace again (it doubles the path!)

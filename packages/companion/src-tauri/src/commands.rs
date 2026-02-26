@@ -478,6 +478,7 @@ async fn gateway_ws_loop() {
                                                         content: params.get("content").and_then(|v| v.as_str()).map(String::from),
                                                         process_name: params.get("process_name").and_then(|v| v.as_str()).map(String::from),
                                                         app_name: params.get("app_name").and_then(|v| v.as_str()).map(String::from),
+                                                        cwd: params.get("cwd").and_then(|v| v.as_str()).map(String::from),
                                                         confirmed: true,
                                                     };
                                                     local_actions::execute(&action_req)
@@ -570,6 +571,7 @@ pub fn get_system_info() -> ActionResult {
         content: None,
         process_name: None,
         app_name: None,
+        cwd: None,
         confirmed: false,
     })
 }
