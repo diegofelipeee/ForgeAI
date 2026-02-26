@@ -316,6 +316,11 @@ export class AgentRuntime {
     // Detect environment at runtime for smarter agent behavior
     const envInfo = this.detectEnvironment();
 
+    // Compute public URL for use in system prompt (sites served via Gateway)
+    const gatewayPort = process.env.GATEWAY_PORT || '18800';
+    const publicUrl = process.env.PUBLIC_URL
+      || `http://${process.env.GATEWAY_HOST === '0.0.0.0' ? 'localhost' : (process.env.GATEWAY_HOST || 'localhost')}:${gatewayPort}`;
+
     // Load workspace prompts (AGENTS.md, SOUL.md, IDENTITY.md, USER.md)
     const workspacePrompts = loadWorkspacePrompts({
       workspacePath: this.config.workspace,
@@ -348,6 +353,13 @@ shell_exec: run ${sh} cmds, timeout=60s (use 120000 for installs)
  DEFAULT CWD is .forgeai/workspace/ — do NOT use Set-Location/cd to .forgeai/workspace again (it doubles the path!)
  Use cwd param for subdirectories: cwd="meu-site" → resolves to .forgeai/workspace/meu-site
 file_manager: read/write/list/delete/mkdir/disk_info in workspace
+SERVER NETWORKING (CRITICAL):
+- You run inside Docker. Only port 18800 is exposed externally.
+- NEVER start http-server/serve on localhost — it's inaccessible from outside.
+- For static websites: create files in .forgeai/workspace/<project-name>/ and the site is AUTOMATICALLY served at: ${publicUrl}/sites/<project-name>/
+- Example: file_manager(action=write, path="my-site/index.html", content="<html>...") → accessible at ${publicUrl}/sites/my-site/
+- ALWAYS report the /sites/ URL to the user, NEVER localhost or internal Docker IPs.
+- No need to run any HTTP server — the Gateway serves static files automatically.
  disk_info: get disk usage (total/used/free) — use this for disk space queries, NOT desktop automation
  mkdir: create directories — use this to create folders, NOT desktop automation
 TOOL PRIORITY (CRITICAL):
@@ -448,7 +460,7 @@ NEVER write an entire large HTML/CSS/JS file in a single tool call. Always split
       parts.push(`Env: ${installed.join(', ')}`);
     }
 
-    // Network info
+    // Network info + public URL detection
     try {
       const os = require('node:os') as typeof import('node:os');
       const nets = os.networkInterfaces();
@@ -461,8 +473,15 @@ NEVER write an entire large HTML/CSS/JS file in a single tool call. Always split
           }
         }
       }
+
+      // Detect public URL from env or build from gateway host/port
+      const publicUrl = process.env.PUBLIC_URL
+        || `http://${process.env.GATEWAY_HOST === '0.0.0.0' ? (localIPs[0] || 'localhost') : (process.env.GATEWAY_HOST || 'localhost')}:${process.env.GATEWAY_PORT || '18800'}`;
+      parts.push(`Public URL: ${publicUrl}`);
+      parts.push(`Sites URL: ${publicUrl}/sites/<project-name>/`);
+
       if (localIPs.length > 0) {
-        parts.push(`Network: local IPs=[${localIPs.join(',')}], NAT=true (no public IP, localhost only)`);
+        parts.push(`Network IPs: ${localIPs.join(', ')}`);
       }
     } catch {
       parts.push('Network: localhost only');

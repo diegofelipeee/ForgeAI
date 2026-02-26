@@ -2382,6 +2382,57 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
     return reply.send(createReadStream(filePath));
   });
 
+  // ─── REST API: Serve Static Sites from Workspace ───
+  // Allows agent-created websites in .forgeai/workspace/<project>/ to be accessed via
+  // http://<server>:18800/sites/<project>/ — no extra ports needed.
+
+  app.get('/sites/*', async (request: FastifyRequest, reply: FastifyReply) => {
+    const { resolve, normalize, sep, join } = await import('node:path');
+    const { createReadStream, existsSync, statSync } = await import('node:fs');
+    const urlPath = (request.params as { '*': string })['*'] || '';
+
+    const workspaceDir = resolve(process.cwd(), '.forgeai', 'workspace');
+    let filePath = normalize(resolve(workspaceDir, urlPath));
+
+    // Security: prevent directory traversal
+    if (!filePath.startsWith(workspaceDir + sep) && filePath !== workspaceDir) {
+      reply.status(403).send({ error: 'Access denied' });
+      return;
+    }
+
+    // If path is a directory, try serving index.html
+    if (existsSync(filePath) && statSync(filePath).isDirectory()) {
+      const indexPath = join(filePath, 'index.html');
+      if (existsSync(indexPath)) {
+        filePath = indexPath;
+      } else {
+        reply.status(404).send({ error: 'No index.html found in directory' });
+        return;
+      }
+    }
+
+    if (!existsSync(filePath)) {
+      reply.status(404).send({ error: 'File not found' });
+      return;
+    }
+
+    const ext = filePath.split('.').pop()?.toLowerCase() || '';
+    const mimeTypes: Record<string, string> = {
+      html: 'text/html', css: 'text/css', js: 'application/javascript',
+      json: 'application/json', txt: 'text/plain',
+      png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+      webp: 'image/webp', svg: 'image/svg+xml', ico: 'image/x-icon',
+      woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf',
+      mp4: 'video/mp4', mp3: 'audio/mpeg', pdf: 'application/pdf',
+    };
+    const contentType = mimeTypes[ext] || 'application/octet-stream';
+
+    reply.header('Content-Type', contentType);
+    reply.header('Cache-Control', 'public, max-age=300');
+    reply.header('Access-Control-Allow-Origin', '*');
+    return reply.send(createReadStream(filePath));
+  });
+
   // ─── REST API: Image Upload ──────────────────────
 
   app.post('/api/chat/upload', async (request: FastifyRequest, reply: FastifyReply) => {

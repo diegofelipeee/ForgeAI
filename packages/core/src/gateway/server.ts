@@ -360,7 +360,7 @@ export class Gateway {
     // Paths exempt from rate limiting (health checks, dashboard polling, static assets)
     const RATE_LIMIT_EXEMPT = new Set(['/health', '/info', '/api/providers', '/api/chat/sessions']);
     // Also exempt progress polling and static dashboard assets
-    const RATE_LIMIT_PREFIX_EXEMPT = ['/api/chat/progress/', '/api/files/', '/dashboard', '/assets/'];
+    const RATE_LIMIT_PREFIX_EXEMPT = ['/api/chat/progress/', '/api/files/', '/sites/', '/dashboard', '/assets/'];
 
     // Admin-only routes: vault, backup, config, security management
     const ADMIN_ROUTES = [
