@@ -8,8 +8,15 @@ use crate::local_actions::{self, ActionRequest, ActionResult};
 use crate::safety;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::OnceLock;
+use tokio::sync::Notify;
 
 static GATEWAY_WS_ACTIVE: AtomicBool = AtomicBool::new(false);
+static RECONNECT_NOTIFY: OnceLock<Notify> = OnceLock::new();
+
+fn get_reconnect_notify() -> &'static Notify {
+    RECONNECT_NOTIFY.get_or_init(|| Notify::new())
+}
 
 /// Build a reqwest::RequestBuilder with auth cookie if available
 fn with_auth(builder: reqwest::RequestBuilder, creds: &crate::connection::CompanionCredentials) -> reqwest::RequestBuilder {
@@ -367,6 +374,18 @@ pub async fn connect_gateway_ws() -> Result<String, String> {
     Ok("Gateway WS connection started".into())
 }
 
+/// Tauri command: force the WS loop to reconnect with fresh credentials (call after re-pairing)
+#[tauri::command]
+pub async fn force_reconnect_gateway_ws() -> Result<String, String> {
+    log::info!("[GatewayWS] Force reconnect requested");
+    get_reconnect_notify().notify_one();
+    // Wait for old loop to exit, then start fresh
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    GATEWAY_WS_ACTIVE.store(false, Ordering::SeqCst);
+    spawn_gateway_ws();
+    Ok("Reconnect initiated".into())
+}
+
 async fn gateway_ws_loop() {
     use futures_util::{SinkExt, StreamExt};
     use tokio_tungstenite::{connect_async, tungstenite::Message};
@@ -517,6 +536,10 @@ async fn gateway_ws_loop() {
                             } else {
                                 log::debug!("[GatewayWS] Keepalive ping sent");
                             }
+                        }
+                        _ = get_reconnect_notify().notified() => {
+                            log::info!("[GatewayWS] Reconnect signal received, closing current connection");
+                            alive = false;
                         }
                     }
                 }

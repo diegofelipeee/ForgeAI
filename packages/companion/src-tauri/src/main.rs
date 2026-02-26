@@ -71,6 +71,7 @@ fn main() {
             commands::delete_session,
             commands::list_audio_devices,
             commands::connect_gateway_ws,
+            commands::force_reconnect_gateway_ws,
         ])
         .setup(|app| {
             // ─── System Tray ───
