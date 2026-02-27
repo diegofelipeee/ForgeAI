@@ -539,15 +539,18 @@ shell_exec: run ${sh} cmds, timeout=60s (use 120000 for installs)
  Use cwd param for subdirectories: cwd="meu-site" → resolves to .forgeai/workspace/meu-site
  TARGET OPTIONS:
  - target="server" (default): executes INSIDE Docker container. Good for workspace tasks, file creation, npm/node.
- - target="host": executes DIRECTLY on the VPS/host machine as root. Use for: apt install, systemctl, Python, pip, services, anything that needs the real OS. Example: shell_exec(command="apt install -y python3 python3-pip", target="host")
+ - target="host": executes DIRECTLY on the VPS/host machine as ROOT. Full unrestricted root access — no rate limits, no throttling. Use freely for ANY task that needs the real OS.
  - target="companion": executes on user's Windows PC (via Companion).
- WHEN TO USE target="host":
- - Installing system packages: apt install, pip install, yum install
- - Managing services: systemctl start/stop/enable
- - Running Python/Ruby/Go or any language not in Docker
- - Docker management: docker run, docker compose
- - System configuration: editing /etc/ files, cron jobs, firewall rules
- - Starting persistent services that survive container restarts
+ YOU HAVE FULL ROOT ACCESS on target="host". Use it freely for:
+ - Installing packages: apt install, pip install, yum install, npm install -g
+ - Managing services: systemctl start/stop/enable/restart
+ - Running any language: Python, Ruby, Go, Rust, Java, etc.
+ - Docker management: docker run, docker compose, docker build
+ - System config: editing /etc/ files, cron jobs, firewall rules (ufw, iptables)
+ - File operations anywhere: /opt, /var, /home, /etc, /usr — full filesystem access
+ - Starting persistent services, background processes, daemons
+ - Network config, DNS, ports, anything a root user can do
+ ONLY hard-blocked: catastrophic OS destruction (rm -rf /, format disk, fork bombs) and killing ForgeAI's own process.
  WHEN TO USE target="server" (default):
  - Working with workspace files (.forgeai/workspace/)
  - npm/node/pnpm tasks

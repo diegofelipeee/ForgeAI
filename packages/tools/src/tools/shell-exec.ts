@@ -10,24 +10,14 @@ import { DEFAULT_GATEWAY_PORT, DEFAULT_WS_PORT } from '@forgeai/shared';
 // Only truly catastrophic, irreversible commands. Everything else is allowed.
 // The agent can do ANYTHING else — install software, modify configs, run servers, etc.
 const HARD_BLOCKED_PATTERNS = [
-  // Linux: wipe root filesystem
-  'rm -rf /',
-  'rm -rf /*',
-  'rm -rf --no-preserve-root',
   // Linux: fork bomb
   ':(){:|:&};:',
-  // Linux: overwrite disk/MBR/partitions
+  // Linux: overwrite disk/MBR/partitions (substring-safe: these don't produce false positives)
   'dd if=/dev/zero of=/dev/sd',
   'dd if=/dev/random of=/dev/sd',
   'dd if=/dev/zero of=/dev/nvme',
   'dd if=/dev/zero of=/dev/hd',
   'dd if=/dev/zero of=/dev/vd',
-  // Linux: destroy boot
-  'rm -rf /boot',
-  'rm -rf /etc',
-  'rm -rf /usr',
-  'rm -rf /var',
-  'rm -rf /lib',
   // Linux: partition wipe
   'wipefs -a /dev/',
   'mkfs.ext4 /dev/sd',
@@ -74,8 +64,12 @@ const HARD_BLOCKED_PATTERNS = [
 
 // Regex patterns for more sophisticated matching
 const HARD_BLOCKED_REGEX = [
-  // Linux: rm -rf on root-level system directories
-  /rm\s+-[a-z]*r[a-z]*f[a-z]*\s+\/(?:boot|etc|usr|var|lib|bin|sbin|proc|sys)\b/i,
+  // Linux: rm -rf / (root) or rm -rf /* — only matches actual root, NOT /tmp/..., /home/user/..., etc.
+  /rm\s+-[a-z]*r[a-z]*f[a-z]*\s+\/(?:\s*$|\*|\s+-|\s+[;&|])/i,
+  // Linux: rm --no-preserve-root
+  /rm\s+.*--no-preserve-root/i,
+  // Linux: rm -rf on root-level system directories (exact: /boot, /etc, NOT /boot-backup)
+  /rm\s+-[a-z]*r[a-z]*f[a-z]*\s+\/(?:boot|etc|usr|var|lib|bin|sbin|proc|sys)(?:\/|\s|$)/i,
   // Windows: format any drive letter
   /format\s+[a-z]:/i,
   // Windows: recursive delete on drive root
@@ -162,24 +156,6 @@ const KILL_ALL_NODE_REGEX = [
   /get-process\s+.*node.*\|.*stop-process/i,
 ];
 
-// ─── Host command rate limiter (10 commands/minute) ───
-const HOST_RATE_LIMIT = 10;
-const HOST_RATE_WINDOW_MS = 60_000;
-const hostCommandTimestamps: number[] = [];
-
-function checkHostRateLimit(): boolean {
-  const now = Date.now();
-  // Remove timestamps older than the window
-  while (hostCommandTimestamps.length > 0 && hostCommandTimestamps[0]! < now - HOST_RATE_WINDOW_MS) {
-    hostCommandTimestamps.shift();
-  }
-  if (hostCommandTimestamps.length >= HOST_RATE_LIMIT) {
-    return false;
-  }
-  hostCommandTimestamps.push(now);
-  return true;
-}
-
 export class ShellExecTool extends BaseTool {
   private workDir: string;
 
@@ -220,16 +196,6 @@ Security: destructive OS-level commands (format C:, rm -rf /, fork bombs) are bl
 
     // ─── Host execution: target="host" uses nsenter to run on the VPS directly ───
     const isHostTarget = target === 'host';
-
-    // ─── Host rate limit: max 10 host commands per minute ───
-    if (isHostTarget && !checkHostRateLimit()) {
-      this.logger.warn('Host command rate limit exceeded', { command });
-      return {
-        success: false,
-        error: `⚠️ Host command rate limit exceeded (max ${HOST_RATE_LIMIT}/minute). Wait a moment before running more host commands.`,
-        duration: 0,
-      };
-    }
 
     // ─── Security Layer 1: Hard-block destructive OS commands ───
     const lowerCmd = command.toLowerCase().replace(/\s+/g, ' ');
