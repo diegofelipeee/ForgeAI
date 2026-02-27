@@ -2,6 +2,7 @@ export { BaseTool } from './base.js';
 export type { ToolParameter, ToolDefinition, ToolResult } from './base.js';
 
 export { ToolRegistry, createToolRegistry } from './registry.js';
+export type { ActivityCallback } from './registry.js';
 
 export { WebBrowserTool } from './tools/web-browser.js';
 export { FileManagerTool } from './tools/file-manager.js';
@@ -17,6 +18,20 @@ export { WebSearchTool } from './tools/web-search.js';
 export { SessionsListTool, SessionsHistoryTool, SessionsSendTool, setAgentManagerRef } from './tools/session-tools.js';
 export { SandboxManager, createSandboxManager } from './sandbox-manager.js';
 export type { SandboxConfig, SandboxResult } from './sandbox-manager.js';
+export { ProxyRotator, configureProxies, getGlobalProxyRotator, setGlobalProxyRotator, isProxyError, parseProxyUrl } from './utils/proxy-rotator.js';
+export type { ProxyConfig, RotationStrategy } from './utils/proxy-rotator.js';
+export { generateStealthProfile, getStealthLaunchArgs, applyStealthEvasions, getGoogleSearchReferer } from './utils/browser-stealth.js';
+export type { StealthProfile } from './utils/browser-stealth.js';
+export {
+  generateFingerprintId,
+  createFingerprint,
+  computeSimilarity,
+  findBestMatch,
+  extractCandidateFromCheerio,
+  extractAllCandidatesFromCheerio,
+  EXTRACT_CANDIDATES_SCRIPT,
+} from './utils/element-fingerprint.js';
+export type { ElementFingerprint, CandidateElement, MatchResult } from './utils/element-fingerprint.js';
 export { GitHubIntegration, createGitHubIntegration } from './integrations/github-integration.js';
 export type { GitHubConfig, GitHubIssue, GitHubPR } from './integrations/github-integration.js';
 export { RSSFeedManager, createRSSFeedManager } from './integrations/rss-feed.js';

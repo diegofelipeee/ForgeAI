@@ -94,6 +94,22 @@ export async function runMigrations(): Promise<void> {
       logger.info('Migration 003_audit_hash_chain applied');
     }
 
+    // Migration 4: Activity Log
+    if (currentVersion < 4) {
+      logger.info('Applying migration 004_activity_log...');
+      await applyMigration004(database);
+      await database('forgeai_migrations').insert({ version: 4, name: '004_activity_log' });
+      logger.info('Migration 004_activity_log applied');
+    }
+
+    // Migration 5: Element Fingerprints (Adaptive Tracking)
+    if (currentVersion < 5) {
+      logger.info('Applying migration 005_element_fingerprints...');
+      await applyMigration005(database);
+      await database('forgeai_migrations').insert({ version: 5, name: '005_element_fingerprints' });
+      logger.info('Migration 005_element_fingerprints applied');
+    }
+
     logger.info('All migrations applied successfully');
   } catch (error) {
     logger.error('Migration failed', error);
@@ -250,6 +266,51 @@ async function applyMigration003(db: Knex): Promise<void> {
       table.index('hash');
     });
     logger.info('Added hash chain columns to audit_log');
+  }
+}
+
+async function applyMigration004(db: Knex): Promise<void> {
+  const hasTable = await db.schema.hasTable('activity_log');
+  if (!hasTable) {
+    await db.schema.createTable('activity_log', (table) => {
+      table.bigIncrements('id');
+      table.timestamp('timestamp').notNullable().defaultTo(db.fn.now());
+      table.string('type', 32).notNullable();
+      table.string('tool_name', 64).notNullable();
+      table.string('target', 16).notNullable().defaultTo('server');
+      table.string('command', 1024).nullable();
+      table.string('summary', 512).notNullable();
+      table.enum('risk_level', ['low', 'medium', 'high', 'critical']).notNullable().defaultTo('low');
+      table.boolean('success').notNullable().defaultTo(true);
+      table.integer('duration_ms').nullable();
+      table.string('session_id', 64).nullable();
+      table.string('user_id', 64).nullable();
+      table.index('timestamp');
+      table.index('type');
+      table.index('target');
+      table.index('risk_level');
+    });
+    logger.info('Created activity_log table');
+  }
+}
+
+async function applyMigration005(db: Knex): Promise<void> {
+  const hasTable = await db.schema.hasTable('element_fingerprints');
+  if (!hasTable) {
+    await db.schema.createTable('element_fingerprints', (table) => {
+      table.string('id', 16).primary();
+      table.string('url', 2048).notNullable();
+      table.string('selector', 1024).notNullable();
+      table.json('fingerprint_json').notNullable();
+      table.timestamp('last_matched').notNullable().defaultTo(db.fn.now());
+      table.integer('match_count').notNullable().defaultTo(1);
+      table.timestamp('created_at').defaultTo(db.fn.now());
+      table.timestamp('updated_at').defaultTo(db.fn.now());
+      table.index('url');
+      table.index('last_matched');
+      table.index('match_count');
+    });
+    logger.info('Created element_fingerprints table');
   }
 }
 
