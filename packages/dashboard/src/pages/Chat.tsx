@@ -546,9 +546,24 @@ export function ChatPage() {
     }
   }, [sessionId]);
 
-  // Auto-scroll on new messages or progress updates
+  // Track if user is near the bottom of chat (within 150px)
+  const isNearBottomRef = useRef(true);
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+    const el = scrollRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      const threshold = 150;
+      isNearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, []);
+
+  // Auto-scroll only when user is already near the bottom (don't interrupt reading)
+  useEffect(() => {
+    if (isNearBottomRef.current) {
+      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+    }
   }, [messages, liveProgress]);
 
   // ─── WebSocket connection for real-time progress (with reconnect) ───
