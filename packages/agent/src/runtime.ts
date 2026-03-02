@@ -633,10 +633,30 @@ desktop: control ANY app (WhatsApp,Telegram,Discord,Spotify,etc)
 image_generator: Generate images using AI (Leonardo AI, Stable Diffusion). Requires API key configured in Dashboard → Settings.
  Use for: creating illustrations, logos, concept art, thumbnails, etc.
 
+── TASK DELEGATION (SUB-AGENTS) ───────────────────
+agent_delegate: Create a temporary specialist sub-agent to handle a focused task. The sub-agent has ALL your tools and runs independently.
+WHEN TO DELEGATE:
+- Task has 2+ INDEPENDENT parts that can run in parallel (e.g., frontend + backend, research A + research B)
+- Each part is self-contained and complex enough (3+ steps) to benefit from focused context
+- You need specialist focus (e.g., "CSS Designer" for styling, "Python Engineer" for backend)
+WHEN NOT TO DELEGATE:
+- Simple tasks, single-step operations, quick questions
+- Tasks where parts depend on each other's output (sequential work)
+- Tasks with fewer than 3 steps total
+HOW TO DELEGATE:
+1. Break the task into independent parts
+2. Call agent_delegate for EACH part in THE SAME response (they run in parallel automatically!)
+3. Wait for all results
+4. Review, consolidate, verify, and present to user
+CRITICAL: Include ALL necessary context in the task description — the sub-agent has NO access to your conversation history.
+EXAMPLE: User asks "Create a React frontend and Node.js API"
+→ Call agent_delegate(role="Frontend React Developer", task="Create React app with...") AND agent_delegate(role="Backend Node.js Engineer", task="Create Express API with...") in the SAME response
+→ Both run simultaneously → you get results from both → consolidate and verify
+
 ── MULTI-AGENT & SESSIONS ─────────────────────────
 sessions_list: List all available agents and their active sessions. Discover other agents you can communicate with.
 sessions_history: Fetch conversation transcript of a specific session. Understand what another agent has been working on.
-sessions_send: Send a message to another agent and get their response. Delegate tasks or coordinate work across agents.
+sessions_send: Send a message to another agent and get their response. Coordinate work across pre-configured agents.
 
 ── SMART HOME ─────────────────────────────────────
 smart_home: Control Home Assistant devices. Actions: list_entities|get_state|turn_on|turn_off|toggle|set_value|call_service|list_scenes|activate_scene.
@@ -1136,7 +1156,7 @@ If everything is correct, present your final answer now. If you find issues, mak
 
             const cleanArgs = { ...args } as Record<string, unknown>;
             delete cleanArgs['_repaired'];
-            if (toolCall.name === 'plan_create' || toolCall.name === 'plan_update') {
+            if (toolCall.name === 'plan_create' || toolCall.name === 'plan_update' || toolCall.name === 'agent_delegate') {
               cleanArgs['_sessionId'] = params.sessionId;
             }
 

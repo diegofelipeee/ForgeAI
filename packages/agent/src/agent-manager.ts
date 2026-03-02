@@ -492,6 +492,121 @@ export class AgentManager {
   get isAgentToAgentEnabled(): boolean {
     return this.agentToAgent.enabled;
   }
+
+  /**
+   * Delegate a task to a temporary specialist sub-agent.
+   * The sub-agent gets the full default system prompt (all tool descriptions, proxy awareness, etc.)
+   * but with agent_delegate denied to prevent recursive delegation.
+   * It runs processMessage independently and returns the result.
+   */
+  async delegateTask(params: {
+    role: string;
+    task: string;
+    context?: string;
+    parentSessionId: string;
+  }): Promise<{
+    success: boolean;
+    content: string;
+    role: string;
+    model: string;
+    duration: number;
+    steps: number;
+    tokens?: number;
+    error?: string;
+  }> {
+    const start = Date.now();
+    const delegateId = `delegate-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+    // Use parent agent's model/provider
+    const defaultAgent = this.getDefaultAgent();
+    const parentConfig = defaultAgent?.getConfig();
+
+    // Build the focused task message (this is what the sub-agent receives as "user" input)
+    const taskMessage = [
+      `## Your Role: ${params.role}`,
+      '',
+      '## Task',
+      params.task,
+      params.context ? `\n## Context\n${params.context}` : '',
+      '',
+      '## Rules',
+      '- Complete this task thoroughly. You have access to ALL tools.',
+      '- Verify your work actually works (browse URLs, check files exist).',
+      '- Use CDN for any frontend libraries (you run behind a proxy).',
+      '- Provide a clear summary of what you accomplished and any file paths created.',
+      '- Do NOT delegate to other agents — you must complete this yourself.',
+    ].filter(Boolean).join('\n');
+
+    // Create temp agent definition — NO custom systemPrompt so it gets the full default
+    // with all tool descriptions, proxy awareness, environment detection, etc.
+    const def: AgentDefinition = {
+      id: delegateId,
+      name: params.role,
+      model: parentConfig?.model ?? 'gpt-4o-mini',
+      provider: (parentConfig?.provider ?? 'openai') as LLMProvider,
+      temperature: 0.5,
+      maxTokens: 4096,
+      tools: { deny: ['agent_delegate'] }, // Prevent recursive delegation
+    };
+
+    logger.info(`Delegating to "${params.role}"`, {
+      delegateId,
+      model: def.model,
+      task: params.task.substring(0, 120),
+    });
+
+    const runtime = this.addAgent(def);
+    const sessionId = `deleg-${delegateId}`;
+
+    // Copy planContextProvider from parent if available
+    if (defaultAgent && (defaultAgent as any).planContextProvider) {
+      runtime.setPlanContextProvider((defaultAgent as any).planContextProvider);
+    }
+
+    try {
+      const result = await runtime.processMessage({
+        sessionId,
+        userId: `delegate:${params.parentSessionId}`,
+        content: taskMessage,
+        channelType: 'delegation',
+      });
+
+      logger.info(`Sub-agent "${params.role}" completed`, {
+        delegateId,
+        duration: Date.now() - start,
+        steps: result.steps?.length ?? 0,
+        tokens: result.usage.totalTokens,
+      });
+
+      return {
+        success: !result.blocked,
+        content: result.content,
+        role: params.role,
+        model: result.model,
+        duration: Date.now() - start,
+        steps: result.steps?.length ?? 0,
+        tokens: result.usage.totalTokens,
+        error: result.blocked ? result.blockReason : undefined,
+      };
+    } catch (error) {
+      logger.error(`Sub-agent "${params.role}" failed`, { delegateId, error });
+      return {
+        success: false,
+        content: '',
+        role: params.role,
+        model: def.model ?? 'unknown',
+        duration: Date.now() - start,
+        steps: 0,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    } finally {
+      // Cleanup: remove temp agent and its data
+      this.agents.delete(delegateId);
+      this.agentDefs.delete(delegateId);
+      this.createdAt.delete(delegateId);
+      logger.info(`Sub-agent "${params.role}" cleaned up`, { delegateId });
+    }
+  }
 }
 
 /**

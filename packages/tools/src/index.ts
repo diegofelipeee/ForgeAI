@@ -17,6 +17,8 @@ export { ImageGeneratorTool } from './tools/image-generator.js';
 export { WebSearchTool } from './tools/web-search.js';
 export { SessionsListTool, SessionsHistoryTool, SessionsSendTool, setAgentManagerRef } from './tools/session-tools.js';
 export { PlanCreateTool, PlanUpdateTool, getSessionPlan, getSessionPlanAny, clearSessionPlan, buildPlanContext, getPlanStats } from './tools/plan-tools.js';
+export { AgentDelegateTool, setDelegateManagerRef } from './tools/delegation-tools.js';
+export type { DelegationResult } from './tools/delegation-tools.js';
 export type { ActivePlan, PlanStep as ActivePlanStep } from './tools/plan-tools.js';
 export { SandboxManager, createSandboxManager } from './sandbox-manager.js';
 export type { SandboxConfig, SandboxResult } from './sandbox-manager.js';
@@ -73,6 +75,7 @@ import { ImageGeneratorTool } from './tools/image-generator.js';
 import { WebSearchTool } from './tools/web-search.js';
 import { SessionsListTool, SessionsHistoryTool, SessionsSendTool } from './tools/session-tools.js';
 import { PlanCreateTool, PlanUpdateTool } from './tools/plan-tools.js';
+import { AgentDelegateTool } from './tools/delegation-tools.js';
 import { SmartHomeTool } from './tools/smart-home.js';
 import { SpotifyTool } from './tools/spotify.js';
 import type { AuditLogger } from '@forgeai/security';
@@ -97,6 +100,7 @@ export function createDefaultToolRegistry(auditLogger?: AuditLogger): ToolRegist
   registry.register(new SpotifyTool());
   registry.register(new PlanCreateTool());
   registry.register(new PlanUpdateTool());
+  registry.register(new AgentDelegateTool());
 
   return registry;
 }
