@@ -4,7 +4,7 @@ import type { AgentConfig } from '@forgeai/shared';
 import { AgentRuntime, AgentManager, createAgentManager, createLLMRouter } from '@forgeai/agent';
 import { getWSBroadcaster } from './ws-broadcaster.js';
 import { WebChatChannel, TeamsChannel, createTeamsChannel, TelegramChannel, createTelegramChannel, WhatsAppChannel, createWhatsAppChannel, GoogleChatChannel, createGoogleChatChannel, NodeChannel, createNodeChannel } from '@forgeai/channels';
-import { createDefaultToolRegistry, type ToolRegistry, createSandboxManager, type SandboxManager, setAgentManagerRef, CronSchedulerTool, buildPlanContext } from '@forgeai/tools';
+import { createDefaultToolRegistry, type ToolRegistry, createSandboxManager, type SandboxManager, setAgentManagerRef, CronSchedulerTool, buildPlanContext, setDelegateManagerRef } from '@forgeai/tools';
 import { createAdvancedRateLimiter, type AdvancedRateLimiter, createIPFilter, type IPFilter, type Vault, type JWTAuth } from '@forgeai/security';
 import { getCompanionBridge, CompanionToolExecutor } from './companion-bridge.js';
 import { createTailscaleHelper, type TailscaleHelper } from '../remote/tailscale-helper.js';
@@ -442,6 +442,9 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
 
   // Wire session tools with AgentManager for agent-to-agent communication
   setAgentManagerRef(agentManager);
+
+  // Wire delegation tools with AgentManager for sub-agent task delegation
+  setDelegateManagerRef(agentManager);
 
   // Wire CronSchedulerTool callback for proactive message delivery
   const cronTool = toolRegistry.get('cron_scheduler') as CronSchedulerTool | undefined;
