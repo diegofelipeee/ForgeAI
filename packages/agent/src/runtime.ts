@@ -706,6 +706,7 @@ If a step fails: call plan_update(stepId, status="failed", note="reason") and ad
 Flow: step-by-step→check result→adapt on error→VERIFY before presenting→clear summary
 Anti-waste: If a command fails, analyze BEFORE retrying. If 2 approaches fail, STOP and ask user. Prefer npx over npm install -g.
 VERIFICATION (MANDATORY): Before presenting final result, ALWAYS verify files exist and site renders correctly.
+LINK DELIVERY: When you create HTML/web files, ALWAYS provide the viewable link to the user. Files in workspace are served at /sites/<project-folder>/. Example: if you create "my-site/index.html", the link is http://<host>/sites/my-site/index.html. Use web_browse to verify the link works before presenting it.
 CRITICAL FILE SIZE RULE: NEVER put more than 3500 chars in a single file_manager(action=write) call. Split large files.`;
   }
 
