@@ -14,7 +14,7 @@
 
 <br />
 
-| 8 Channels | 10 LLM Providers | 15 Tools | 19 Dashboard Pages | 150+ API Endpoints | 9 Security Modules |
+| 8 Channels | 10 LLM Providers | 19 Tools | 19 Dashboard Pages | 150+ API Endpoints | 9 Security Modules |
 |:---:|:---:|:---:|:---:|:---:|:---:|
 
 <br />
@@ -38,7 +38,7 @@ ForgeAI is a **production-ready, fully self-hosted AI assistant platform** built
 Unlike cloud-based AI services, ForgeAI runs **entirely on your machine**. Your conversations, API keys, and personal data never leave your network. Every secret is encrypted with AES-256-GCM, every action is logged in an immutable audit trail, and every request passes through 9 security modules before reaching the agent.
 
 ```
-Your Messages ──→ 9 Security Layers ──→ Agent (any LLM) ──→ 15 Tools ──→ Response
+Your Messages ──→ 9 Security Layers ──→ Agent (any LLM) ──→ 19 Tools ──→ Response
      ↑                                                              ↓
   WhatsApp                                                    Browse web
   Telegram                                                    Run code
@@ -65,7 +65,7 @@ Your Messages ──→ 9 Security Layers ──→ Agent (any LLM) ──→ 15
 One AI, every platform. WhatsApp, Telegram, Discord, Slack, Microsoft Teams, Google Chat, WebChat, and IoT devices via Node Protocol. Each channel gets real-time progress updates, typing indicators, and automatic message chunking.
 
 ### 🤖 Autonomous Agent
-The agentic loop runs up to **25 iterations** per request. The agent browses the web (with stealth anti-detection), executes code, manages files, takes screenshots, schedules tasks, controls smart home devices, and communicates with other agents — all without human intervention. **Self-management**: the agent autonomously diagnoses and fixes its own tool failures (Chromium locks, port conflicts, permissions).
+The agentic loop runs with **no iteration limit** — the agent works until the task is complete (only stuck-loop detection serves as safety). It browses the web (with stealth anti-detection), executes code, manages files, takes screenshots, schedules tasks, controls smart home devices, **creates Forge Teams of specialist agents**, and communicates with other agents — all without human intervention. **Self-management**: the agent autonomously diagnoses, fixes, and **installs missing dependencies** (languages, libraries, tools) with full root access. **Adaptive Prompt Optimizer**: learns from past task outcomes to improve future performance.
 
 </td>
 <td width="50%">
@@ -153,7 +153,7 @@ Every provider has **circuit breaker** protection (5-failure threshold, 2-minute
 > **💡 Subscription-Based API Access (Anthropic)**
 > You don't need a pay-as-you-go API key to use Claude. If you have a **Claude Pro**, **Max**, or **CLI** subscription plan, you can use the API key tied to your plan. ForgeAI treats it like any other Anthropic key — just paste it in Dashboard → Settings → Anthropic. The billing goes through your existing subscription instead of per-token charges. This is especially useful for accessing **Claude Opus 4.6** at a fixed monthly cost.
 
-### Built-in Tools (15)
+### Built-in Tools (19)
 
 | Tool | What it does |
 |:-----|:-------------|
@@ -172,6 +172,10 @@ Every provider has **circuit breaker** protection (5-failure threshold, 2-minute
 | `image_generate` | Generate images via DALL-E 3, Leonardo AI, or Stable Diffusion. Save to disk. |
 | `smart_home` | Control smart home devices and routines via natural language. Home Assistant integration. |
 | `spotify` | Spotify playback control: play/pause/skip, search, playlists, queue management, device switching. |
+| `plan_create` | Create structured execution plans with steps, statuses, and auto-progression. Breaks complex goals into manageable steps. |
+| `plan_update` | Update plan step statuses (pending/in_progress/completed/failed/skipped). Auto-advances to next step on completion. |
+| `agent_delegate` | Delegate tasks to temporary specialist sub-agents that run in parallel. Each sub-agent has full tool access and works independently. |
+| `forge_team` | **Forge Teams** — Create coordinated teams of specialist agents with dependency graphs. Independent tasks run in parallel; dependent tasks wait for upstream results and receive them as context. Supports up to 5 workers per team. |
 
 ### Security Modules (9)
 
@@ -434,9 +438,60 @@ Accessible at: https://yourdomain.com/sites/startup-landing/
 ## 🧠 Advanced Capabilities
 
 <details>
-<summary><b>Agentic Loop (25 iterations)</b></summary>
+<summary><b>Agentic Loop (Unlimited Iterations)</b></summary>
 
-The agent autonomously iterates: think → decide tool → execute → process result → repeat. Up to 25 iterations per request. Each iteration is tracked with real-time progress broadcast via WebSocket to the Dashboard and messaging channels.
+The agent autonomously iterates: think → decide tool → execute → process result → repeat. **No iteration limit** — the agent works until the task is complete. Only stuck-loop detection (duplicate tool call sequences) serves as a safety net. Each iteration is tracked with real-time progress broadcast via WebSocket to the Dashboard and messaging channels. **Reflection phase**: after 3+ iterations with tool calls, the agent verifies its own work quality before presenting the final answer.
+
+</details>
+
+<details>
+<summary><b>Forge Teams (Coordinated Agent Teams)</b></summary>
+
+Create teams of specialist agents that work together on complex projects — inspired by Claude Code's Agent Teams.
+
+```
+User: "Create a full-stack app with React frontend and Flask API"
+
+→ forge_team creates 3 specialists:
+  ┌─────────────────┐    ┌──────────────────┐
+  │  UI Designer     │    │ Backend Engineer  │    ← run in PARALLEL
+  │  (landing page)  │    │ (Flask API)       │
+  └────────┬────────┘    └────────┬─────────┘
+           │                       │
+           └───────────┬───────────┘
+                       ▼
+              ┌─────────────────┐
+              │ Integration Eng. │    ← WAITS for both, receives their outputs
+              │ (connect FE+BE)  │
+              └─────────────────┘
+```
+
+- **Dependency graph**: tasks declare dependencies; dependent tasks wait and receive upstream outputs as context
+- **Parallel execution**: independent tasks run simultaneously
+- **Up to 5 workers** per team, **2 concurrent teams** max
+- **Dashboard visibility**: active teams visible at `GET /api/teams/active` and in the Agents page
+- Workers have **full tool access** (file_manager, shell_exec, browser, etc.)
+
+</details>
+
+<details>
+<summary><b>Task Delegation (Sub-Agents)</b></summary>
+
+For simpler parallel work, the agent can delegate tasks to temporary specialist sub-agents via `agent_delegate`. Each sub-agent has full tool access, runs independently, and returns results to the main agent. Multiple `agent_delegate` calls in the same LLM response run in **parallel** via Promise.allSettled. Sub-agents cannot delegate further (no recursion).
+
+</details>
+
+<details>
+<summary><b>Adaptive Prompt Optimizer</b></summary>
+
+The agent **learns from past task outcomes** and automatically improves prompts for future tasks. Inspired by DSPy's optimization concepts, built natively for ForgeAI.
+
+- **Task classification**: categorizes tasks into 9 types (web_creation, api_development, data_analysis, scripting, research, file_operations, system_admin, automation, general)
+- **Success patterns**: records tool-call sequences from successful tasks with scores (0–1) based on failures, reflection triggers, and iteration count
+- **Anti-patterns**: tracks failure patterns and generates avoidance instructions
+- **Few-shot injection**: injects proven strategies and warnings into prompts for similar future tasks
+- **Persistence**: data saved to `prompt-optimizer.json`, auto-saves every 60 seconds
+- **Temporal decay**: old patterns lose relevance (30-day window), keeping the most recent and effective strategies at the top
 
 </details>
 
@@ -704,14 +759,14 @@ API endpoints:
               ┌────────────▼──┐  ┌────▼──────────┐
               │  AGENT LAYER   │  │   TOOL LAYER   │
               │                │  │                 │
-              │ AgentManager   │  │ 15 built-in     │
+              │ AgentManager   │  │ 19 built-in     │
               │ AgentRuntime   │  │ MCP Client      │
               │ LLM Router     │  │ Tool Registry   │
-              │ 10 providers   │  │ Sandbox (Docker) │
-              │ Circuit breaker│  │                 │
+              │ 10 providers   │  │ Forge Teams     │
+              │ Circuit breaker│  │ Sandbox (Docker) │
               │ Failover chain │  └────────┬────────┘
               │ Agentic loop   │           │
-              │ (25 iterations)│  ┌────────▼────────┐
+              │ Prompt Optimizer│ ┌────────▼────────┐
               └────────────────┘  │  INTEGRATIONS    │
                                   │  GitHub · Gmail  │
                                   │  Calendar ·Notion│
@@ -734,9 +789,9 @@ API endpoints:
 packages/
 ├── shared/      →  Types, utils, constants, logger
 ├── security/    →  Vault, RBAC, Rate Limiter, Audit, Prompt Guard, JWT, 2FA, Email OTP, Sanitizer, IP Filter
-├── agent/       →  AgentRuntime, AgentManager, LLM Router (10 providers), UsageTracker, Agentic Loop
+├── agent/       →  AgentRuntime, AgentManager, LLM Router (10 providers), ForgeTeamEngine, PromptOptimizer, Agentic Loop
 ├── channels/    →  WhatsApp, Telegram, Discord, Slack, Teams, Google Chat, WebChat, Node Protocol
-├── tools/       →  Tool Registry, 13 tools, GitHub/Gmail/Calendar/Notion/RSS integrations
+├── tools/       →  Tool Registry, 19 tools (incl. forge_team, agent_delegate, plan tools), GitHub/Gmail/Calendar/Notion/RSS integrations
 ├── plugins/     →  Plugin Manager, Plugin SDK, AutoResponder, ContentFilter, ChatCommands
 ├── workflows/   →  Workflow Engine, step runner, dependency graph, parallel execution
 ├── core/        →  Gateway (Fastify), DB (Knex+MySQL), WS Broadcaster, Telemetry, Autopilot, Pairing, Config Sync
@@ -909,19 +964,19 @@ pnpm forge status      # Quick status check
 
 ## 🗺 Roadmap
 
-### Completed — 29 Phases
+### Completed — 33 Phases
 
 All core features are implemented and tested:
 
 - **Security** — 9 modules, encrypted vault, RBAC, rate limiting, prompt guard, 2FA, Email OTP (external access), setup wizard, audit
-- **Agent** — Multi-LLM router (10 providers incl. Ollama + OpenAI-Compatible), agentic loop (25 iter), thinking levels, failover + circuit breaker
+- **Agent** — Multi-LLM router (10 providers incl. Ollama + OpenAI-Compatible), agentic loop (unlimited iterations), thinking levels, failover + circuit breaker, reflection phase
 - **Channels** — WhatsApp, Telegram, Discord, Slack, Teams, Google Chat, WebChat, Node Protocol (IoT)
-- **Tools** — 15 built-in + MCP Client + Puppeteer + Shell + Sandbox
+- **Tools** — 19 built-in + MCP Client + Puppeteer + Shell + Sandbox
 - **Dashboard** — 19 pages, WebSocket real-time, provider balance tracking
 - **Multimodal** — Vision input (image analysis), Voice STT/TTS, Image generation (DALL-E 3, Leonardo AI, Stable Diffusion)
 - **Integrations** — GitHub, Gmail, Google Calendar, Notion, RSS
-- **Advanced** — RAG, AutoPlanner, Workflows, Memory, Autopilot, DM Pairing, Multi-Agent
-- **Infrastructure** — Docker, CI/CD, E2E tests, OpenTelemetry, GDPR, OAuth2, IP filtering
+- **Advanced** — RAG, AutoPlanner, Workflows, Memory, Autopilot, DM Pairing, Multi-Agent, **Forge Teams**, **Prompt Optimizer**
+- **Infrastructure** — Docker (Python 3 + Node.js 22 + Chromium), CI/CD, E2E tests, OpenTelemetry, GDPR, OAuth2, IP filtering
 - **Node Protocol** — Lightweight Go binary (~5MB) for embedded devices (Raspberry Pi, Jetson, BeagleBone, NanoKVM). WebSocket connection to Gateway, auth, heartbeat, remote command execution, system info reporting, node-to-node relay. Key management via Dashboard (encrypted Vault, hot-reload). Cross-compilation for Linux ARM/AMD64, Windows, macOS
 - **Security Hardening** — Startup integrity check, generic webhook alerts, audit log rotation, RBAC hard enforcement (403 block for non-admin authenticated users)
 - **First-Run Setup Wizard** — Guided setup on first access: SMTP configuration with test connection, 2FA (TOTP) with QR code, admin PIN change. Smart local/external IP detection with 4-factor auth for VPS/external access (Access Token + PIN + TOTP + Email OTP). Email OTP service with styled HTML emails, 5-minute expiry, rate limiting. SMTP config manageable from Dashboard Settings
@@ -939,6 +994,11 @@ All core features are implemented and tested:
 - **Stealth Browser + Proxy + Markdown** — Puppeteer stealth anti-detection (fingerprint spoofing, canvas noise, WebGL masking, WebRTC protection, CDP hiding). Native proxy rotation for browser and HTTP requests. HTML→clean Markdown extraction via Turndown in `web_browse`
 - **Adaptive Element Tracking** — Fingerprint-based element re-location when CSS selectors break. Jaccard similarity on attributes/text/parent chain with weighted scoring and confidence thresholds (high/medium/low). MySQL persistence for fingerprints. Works in both Puppeteer and Cheerio-based tools
 - **Agent Autonomy & Self-Management** — Full unrestricted root access on host (`target="host"`). Agent self-management instructions: auto-repair Chromium locks, port conflicts, disk issues, permission errors. Refined anti-catastrophe protection (precise regex for `rm -rf`, no false positives on `/tmp/`). Smart home (`smart_home`) and Spotify (`spotify`) tools
+- **Execution Planning Tools** — `plan_create` and `plan_update` tools for structured task execution. Plans with steps (pending/in_progress/completed/failed/skipped), auto-advance, max 15 steps. Plan context injected on each LLM iteration via callback (no circular dependency). Global per-session plan store
+- **Task Delegation (Sub-Agents)** — `agent_delegate` tool for parallel sub-agent task execution. Temporary specialist agents with full tool access, anti-recursion (sub-agents can't delegate), auto-cleanup. Multiple delegates in same LLM response run in parallel via Promise.allSettled
+- **Forge Teams (Coordinated Agent Teams)** — `forge_team` tool for creating coordinated teams of specialist agents with dependency graphs. Independent tasks run in parallel; dependent tasks wait and receive upstream outputs as context. Up to 5 workers per team, 2 concurrent teams. Dashboard visibility via `/api/teams/active`. Inspired by Claude Code's Agent Teams
+- **Adaptive Prompt Optimizer** — Native DSPy-inspired auto-optimization. Classifies tasks into 9 categories, records success/failure patterns with scores, injects proven strategies + anti-patterns into prompts for similar future tasks. Persists to JSON, auto-saves every 60s, temporal decay for old patterns
+- **Full Installation Freedom** — Docker image includes Python 3, pip, venv, curl, git alongside Node.js 22 and Chromium. Agent has explicit instructions to install ANY missing dependency (languages, libraries, tools) with full root access. Never substitutes technologies — if user asks for Flask, agent installs Flask
 
 ### What's Next
 
@@ -957,6 +1017,11 @@ All core features are implemented and tested:
 | ~~Adaptive element tracking (fingerprint matching)~~ | ✅ Done |
 | ~~Agent self-management + full root access~~ | ✅ Done |
 | ~~Smart Home + Spotify tools~~ | ✅ Done |
+| ~~Forge Teams (coordinated agent teams)~~ | ✅ Done |
+| ~~Adaptive Prompt Optimizer (DSPy-inspired)~~ | ✅ Done |
+| ~~Task Delegation (parallel sub-agents)~~ | ✅ Done |
+| ~~Execution Planning tools~~ | ✅ Done |
+| ~~Python + multi-language support in Docker~~ | ✅ Done |
 | React Native mobile app (iOS + Android) | Medium |
 | ForgeAI Companion for macOS / Linux | Medium |
 | Signal messenger channel | Low |
