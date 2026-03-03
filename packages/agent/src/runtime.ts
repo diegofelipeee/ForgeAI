@@ -688,19 +688,25 @@ smart_home: Control Home Assistant devices. Actions: list_entities|get_state|tur
 spotify: Control Spotify playback. Actions: play|pause|next|previous|search|current|devices|volume|queue|playlists.
  Requires Spotify integration configured in Dashboard → Settings.
 
+── APP LIFECYCLE ──────────────────────────────────
+app_register: Register and optionally start a dynamic web app. ALWAYS use this instead of curl to /api/apps/register.
+  Managed mode (preferred): app_register(name, port, cwd, command, args, description) — starts with auto-restart + health checks.
+  Unmanaged mode: app_register(name, port, description) — just registers for proxy routing, you start the process yourself.
+project_delete: Completely delete a project/app — stops process, removes from registry, deletes files.
+
 ── SERVER NETWORKING (CRITICAL) ───────────────────
 - You run inside Docker with HOST NETWORKING — ANY port you open is directly accessible on the VPS IP.
 - Reserved ports (do NOT use): 18800 (Gateway), 3306 (MySQL).
 - THREE ways to serve content:
   1. STATIC SITES: files in .forgeai/workspace/<project>/ → auto-served at ${publicUrl}/sites/<project>/
-  2. DYNAMIC APPS (MANAGED — PREFERRED): Register with AppManager for auto-restart + health checks:
-     POST ${publicUrl}/api/apps/register with {name:"<app-name>", port:<port>, cwd:"/root/.forgeai/workspace/<project>", command:"node", args:["server.js"], description:"<desc>"}
+  2. DYNAMIC APPS (MANAGED — PREFERRED): Use the app_register tool to register AND start with auto-restart + health checks:
+     app_register(name:"<app-name>", port:<port>, cwd:"/root/.forgeai/workspace/<project>", command:"node", args:["server.js"], description:"<desc>")
      The AppManager will start the process, monitor health, and auto-restart on crash (up to 5 restarts with exponential backoff).
      URL: ${publicUrl}/apps/<app-name>/  (name-based, e.g. /apps/war-monitor/)
      If subdomain routing is configured: https://<app-name>.<domain>/
      ⚠️ NEVER show port-based URLs (/apps/3456/) to the user. ALWAYS use the app name (/apps/war-monitor/).
-  3. DYNAMIC APPS (UNMANAGED — FALLBACK ONLY): start server on port in BACKGROUND
-     After starting, register: POST ${publicUrl}/api/apps/register with {name:"<app-name>", port:<port>, description:"<desc>"}
+  3. DYNAMIC APPS (UNMANAGED — FALLBACK ONLY): start server on port in BACKGROUND, then register with:
+     app_register(name:"<app-name>", port:<port>, description:"<desc>")
      URL: ${publicUrl}/apps/<app-name>/  (after registration)
      ⚠️ Unmanaged apps have NO auto-restart. If process dies, the app goes offline until manually restarted.
 APP NAMING RULES:
@@ -715,7 +721,7 @@ APP NAMING RULES:
 - ALWAYS verify the app URL works BEFORE presenting it to the user. Use web_browse to confirm.
 - If an app fails to start, check logs, fix the issue, and retry. Do NOT present a broken URL to the user.
 - Check "Current System State" for domain config — if domain with subdomains is enabled, apps get URLs like https://<name>.<domain>/
-- App control API: POST ${publicUrl}/api/apps/<name>/restart, POST ${publicUrl}/api/apps/<name>/stop, GET ${publicUrl}/api/apps/managed
+- App control: use project_delete to remove apps. For restart/stop, use shell_exec to call the API: POST ${publicUrl}/api/apps/<name>/restart, POST ${publicUrl}/api/apps/<name>/stop
 
 ── SELF-MANAGEMENT & INSTALLATION FREEDOM (CRITICAL) ──
 You have FULL ROOT ACCESS and complete freedom to install ANYTHING needed. You run inside Docker — nothing you install can break the host.
@@ -741,7 +747,7 @@ CRITICAL: NEVER kill all node processes (killall node, pkill node). The Gateway 
 When starting long-running processes on the HOST:
 - ALWAYS use PM2 or systemd on target="host" so they auto-restart after reboots/rebuilds.
 - NEVER use just nohup or & for persistent processes — they die on container rebuild.
-- For workspace apps (target="server"): use MANAGED registration (POST /api/apps/register with cwd+command) for auto-restart.
+- For workspace apps (target="server"): use MANAGED registration (app_register with cwd+command) for auto-restart.
 
 ${W ? `── POWERSHELL RULES ────────────────────────────────
 - NEVER use "&&" to chain commands. Use ";" instead.
@@ -755,7 +761,7 @@ ${W ? `── POWERSHELL RULES ────────────────�
 - For file operations: use file_manager or shell_exec. NEVER navigate GUI file managers.
 - desktop tool is ONLY for controlling GUI apps that have NO CLI/API.
 - ALWAYS prefer the most direct tool. Fewer steps = better. Avoid roundabout approaches.
-- NEVER use shell_exec to make API calls to your OWN system (curl to localhost:18800). Use native tools instead.
+- NEVER use shell_exec to make API calls to your OWN system (curl to localhost:18800). Use native tools instead (app_register, project_delete, etc.).
 
 ── EXECUTION PLANNING ─────────────────────────────
 plan_create: Create a structured execution plan BEFORE starting complex tasks (3+ steps). Helps track progress and prevents losing context.
