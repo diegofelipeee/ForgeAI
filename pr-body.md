@@ -1,33 +1,49 @@
-## Problem
+## Description
 
-When the agent creates dynamic apps, it starts them with a fragile background process that dies easily. When the app crashes, the proxy returns raw JSON exposing internal tool names, which then triggers Prompt Guard false positives when users paste the error back.
+Sub-Agent Visibility & Persistence (Phase 1 + 2): Delegation history store persists sub-agent results instead of deleting them, new API endpoints expose delegation history, and the Agents dashboard now renders Forge Teams and delegation history with full CRUD.
 
-## Solution
+## Type of Change
 
-### AppManager (app-manager.ts)
-- Full process lifecycle: spawn, monitor, auto-restart with exponential backoff (up to 5 restarts)
-- Health checks every 30s (HTTP HEAD probe on app port)
-- Graceful shutdown: SIGTERM then SIGKILL after 5s
-- Per-app status tracking: running/stopped/crashed/starting
+- [ ] Bug fix
+- [x] New feature
+- [ ] Refactor (no functional changes)
+- [ ] Documentation
+- [ ] Tests
+- [ ] Security
 
-### Beautiful Offline Page
-- Dark-themed HTML error page replaces raw JSON when app is down
-- Auto-refreshes every 15s, no internal details exposed
+## Changes Made
 
-### Managed App Registration
-- POST /api/apps/register now accepts cwd, command, args to start as managed process
-- New endpoints: restart, stop, list managed apps
-- Registry now includes status, PID, restart count, last health check
+- **DelegationRecord interface** added to `agent-manager.ts`: id, role, task, result, model, provider, status, duration, steps, tokens, timestamps, source
+- **delegateTask() now persists results** before cleanup — captures content, steps, tokens, error status into in-memory history (capped at 100 FIFO)
+- **History management methods**: `addDelegationRecord()`, `getDelegationHistory()`, `removeDelegation()`, `clearDelegationHistory()`
+- **API endpoints** in `chat-routes.ts`: `GET /api/delegations`, `DELETE /api/delegations/:id`, `DELETE /api/delegations`
+- **Forge Teams section** in Agents dashboard: active teams with worker status badges (running/completed/failed/pending)
+- **Sub-Agentes & Delegações section** in Agents dashboard: delegation history cards with role, task, result preview, model, duration, tokens, timestamps
+- Individual delete + bulk clear for delegations
+- Auto-refresh every 10s for live team status
+- Dashboard API types: `DelegationRecord`, `TeamInfo` interfaces + `getDelegations()`, `deleteDelegation()`, `clearDelegations()` methods
 
-### System Prompt Updates
-- Agent instructed to use managed registration over background processes
-- Must verify app URL works before presenting to user
+## How to Test
 
-### Files Changed
+1. `pnpm -r build`
+2. `pnpm forge start --migrate`
+3. `pnpm test` — expect all tests passing (131 pass)
+4. Open dashboard → Agents page → verify Forge Teams and Delegations sections appear after sub-agent activity
+5. Use `agent_delegate` or `forge_team` tools → verify delegation records appear in dashboard
+6. Delete individual records and clear all → verify cleanup works
 
-| File | Changes |
-|------|---------|
-| `packages/core/src/gateway/app-manager.ts` | NEW: AppManager class + generateAppDownPage |
-| `packages/core/src/gateway/chat-routes.ts` | Managed registration, control endpoints, HTML error page |
-| `packages/core/src/gateway/server.ts` | Subdomain proxy uses HTML error page |
-| `packages/agent/src/runtime.ts` | System prompt with managed app instructions |
+## Related Issue
+
+N/A
+
+## Screenshots
+
+N/A
+
+## Checklist
+
+- [x] Code builds without errors (`pnpm -r build`)
+- [x] Tests pass (`pnpm test`) — 131 tests pass
+- [x] Commit messages follow Conventional Commits
+- [x] No secrets or API keys committed
+- [x] Documentation updated (if needed)
