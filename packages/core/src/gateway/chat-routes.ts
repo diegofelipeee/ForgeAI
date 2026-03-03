@@ -4,7 +4,7 @@ import type { AgentConfig } from '@forgeai/shared';
 import { AgentRuntime, AgentManager, createAgentManager, createLLMRouter } from '@forgeai/agent';
 import { getWSBroadcaster } from './ws-broadcaster.js';
 import { WebChatChannel, TeamsChannel, createTeamsChannel, TelegramChannel, createTelegramChannel, WhatsAppChannel, createWhatsAppChannel, GoogleChatChannel, createGoogleChatChannel, NodeChannel, createNodeChannel } from '@forgeai/channels';
-import { createDefaultToolRegistry, type ToolRegistry, createSandboxManager, type SandboxManager, setAgentManagerRef, CronSchedulerTool, buildPlanContext, setDelegateManagerRef, setForgeTeamRef, setProjectDeleteRefs } from '@forgeai/tools';
+import { createDefaultToolRegistry, type ToolRegistry, createSandboxManager, type SandboxManager, setAgentManagerRef, CronSchedulerTool, buildPlanContext, setDelegateManagerRef, setForgeTeamRef, setProjectDeleteRefs, setAppRegisterRefs } from '@forgeai/tools';
 import { createAdvancedRateLimiter, type AdvancedRateLimiter, createIPFilter, type IPFilter, type Vault, type JWTAuth } from '@forgeai/security';
 import { getCompanionBridge, CompanionToolExecutor } from './companion-bridge.js';
 import { createTailscaleHelper, type TailscaleHelper } from '../remote/tailscale-helper.js';
@@ -468,6 +468,15 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
     appManager: appManager ?? null,
     vault: vault ?? null,
     workspaceRoot,
+  });
+
+  // Wire AppRegister tool with app registry, app manager, vault, and URL helper
+  setAppRegisterRefs({
+    appRegistry: appRegistry as any,
+    appManager: appManager ?? null,
+    vault: vault ?? null,
+    publicUrl: process.env['PUBLIC_URL'] || `http://127.0.0.1:${process.env['GATEWAY_PORT'] || 18800}`,
+    getSiteUrl: (name: string) => getSiteUrl(name, 'app', vault),
   });
 
   // Wire CronSchedulerTool callback for proactive message delivery

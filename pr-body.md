@@ -1,8 +1,6 @@
 ## Description
 
-Phase 3: Real-time WebSocket streaming of sub-agent progress + App deletion bug fix + ProjectDelete tool.
-
-Sub-agents now stream their progress (tool calls, thinking, steps) in real-time to the parent session's dashboard via WebSocket. Also fixes the bug where deleted apps remained accessible via their port URL, and adds a comprehensive `project_delete` tool.
+New `app_register` tool: internal tool for the agent to register and start dynamic apps without relying on HTTP API authentication. Replaces the fragile `curl POST /api/apps/register` pattern.
 
 ## Type of Change
 
@@ -15,31 +13,33 @@ Sub-agents now stream their progress (tool calls, thinking, steps) in real-time 
 
 ## Changes Made
 
-### Phase 3: Real-time Sub-Agent Streaming
-- **`AgentManager.setProgressBroadcaster()`** — new method to register a callback that forwards sub-agent progress events to the parent session
-- **`delegateTask()` registers `onProgress` listener** on delegate runtimes — events prefixed with `delegate.` (progress/step/done) are broadcast to the parent session via WebSocket
-- **Gateway wiring** in `chat-routes.ts` — connects the broadcaster to `wsBroadcaster.broadcastToSession()`
-- **Chat.tsx delegate progress UI** — new `delegateProgress` state tracks active sub-agents, renders purple-themed cards with role, iteration, tool calls, and step history in real-time
+### New: `app_register` tool
+- **`packages/tools/src/tools/app-register.ts`** — New tool that directly manipulates `appRegistry` + `AppManager`, bypassing HTTP auth
+- **Managed mode** (preferred): Provide `name`, `port`, `cwd`, `command`, `args` → AppManager spawns process with auto-restart + health checks
+- **Unmanaged mode**: Provide `name`, `port` → registers for proxy routing only
+- Validates app name, port range, reserved ports (18800/3306)
+- Persists registry to vault
+- Returns the public URL for the app
 
-### Bug Fix: App Deletion
-- **Proxy 404 for unregistered ports** — `/apps/:portOrName/*` now returns 404 if port-based lookup finds no registered app, instead of proxying and showing "Application Offline"
-- **`project_delete` tool** — comprehensive cleanup: stops process, kills port, removes from `appRegistry`, persists to vault, deletes project files
+### Wiring & Integration
+- **`packages/tools/src/index.ts`** — Exported and registered `AppRegisterTool` (21 tools total)
+- **`packages/core/src/gateway/chat-routes.ts`** — `setAppRegisterRefs()` wired with appRegistry, appManager, vault, publicUrl, getSiteUrl
+- **`packages/agent/src/runtime.ts`** — System prompt updated to instruct agent to use `app_register` tool instead of curl; added APP LIFECYCLE section
 
-### Phase 1+2 (from previous session)
-- DelegationRecord persistence, delegation history API, Forge Teams + delegations in Agents dashboard
+### Test Update
+- **`tests/api.test.ts`** — Expected tool count updated from 20 → 21
 
 ## How to Test
 
 1. `pnpm -r build`
 2. `pnpm forge start --migrate`
-3. `pnpm test` — expect all tests passing (131 pass)
-4. Open dashboard → Chat → trigger `agent_delegate` → verify sub-agent progress appears in purple cards with live tool calls
-5. Delete an app → verify its port URL returns 404
-6. Ask agent to use `project_delete` → verify full cleanup (process, registry, files)
+3. `pnpm test` — expect 21 tools registered
+4. Ask the agent to create a web app (e.g. "create a portfolio site with Express") → verify it uses `app_register` instead of `curl`
+5. Verify the app URL works and the app appears in `/api/apps/managed`
 
 ## Related Issue
 
-N/A
+Fixes: Agent fails to register apps because `curl POST /api/apps/register` is blocked by gateway authentication middleware.
 
 ## Screenshots
 
@@ -48,7 +48,7 @@ N/A
 ## Checklist
 
 - [x] Code builds without errors (`pnpm -r build`)
-- [x] Tests pass (`pnpm test`) — 131 tests pass
+- [x] Tests pass (`pnpm test`)
 - [x] Commit messages follow Conventional Commits
 - [x] No secrets or API keys committed
 - [x] Documentation updated (if needed)

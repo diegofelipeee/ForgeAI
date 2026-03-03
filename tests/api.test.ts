@@ -464,11 +464,11 @@ describe('ForgeAI Gateway API Tests', () => {
       expect(toolNames).toContain('web_search');
     });
 
-    it('GET /api/tools should have 20 tools registered', async () => {
+    it('GET /api/tools should have 21 tools registered', async () => {
       const { status, data } = await get('/api/tools');
       expect(status).toBe(200);
       const tools = data.tools ?? data;
-      expect((tools as Array<unknown>).length).toBe(20);
+      expect((tools as Array<unknown>).length).toBe(21);
     });
   });
 

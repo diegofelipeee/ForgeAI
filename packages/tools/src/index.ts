@@ -21,6 +21,7 @@ export { AgentDelegateTool, setDelegateManagerRef } from './tools/delegation-too
 export type { DelegationResult } from './tools/delegation-tools.js';
 export { ForgeTeamTool, setForgeTeamRef, getActiveTeamsRef } from './tools/team-tools.js';
 export { ProjectDeleteTool, setProjectDeleteRefs } from './tools/project-delete.js';
+export { AppRegisterTool, setAppRegisterRefs } from './tools/app-register.js';
 export type { ActivePlan, PlanStep as ActivePlanStep } from './tools/plan-tools.js';
 export { SandboxManager, createSandboxManager } from './sandbox-manager.js';
 export type { SandboxConfig, SandboxResult } from './sandbox-manager.js';
@@ -80,6 +81,7 @@ import { PlanCreateTool, PlanUpdateTool } from './tools/plan-tools.js';
 import { AgentDelegateTool } from './tools/delegation-tools.js';
 import { ForgeTeamTool } from './tools/team-tools.js';
 import { ProjectDeleteTool } from './tools/project-delete.js';
+import { AppRegisterTool } from './tools/app-register.js';
 import { SmartHomeTool } from './tools/smart-home.js';
 import { SpotifyTool } from './tools/spotify.js';
 import type { AuditLogger } from '@forgeai/security';
@@ -107,6 +109,7 @@ export function createDefaultToolRegistry(auditLogger?: AuditLogger): ToolRegist
   registry.register(new AgentDelegateTool());
   registry.register(new ForgeTeamTool());
   registry.register(new ProjectDeleteTool());
+  registry.register(new AppRegisterTool());
 
   return registry;
 }
