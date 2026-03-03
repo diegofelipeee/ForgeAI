@@ -10,7 +10,6 @@ export class DeepSeekProvider extends OpenAICompatibleProvider {
       apiKeyEnv: 'DEEPSEEK_API_KEY',
       models: [
         'deepseek-chat',
-        'deepseek-coder',
         'deepseek-reasoner',
       ],
     }, apiKey);

@@ -35,10 +35,9 @@ const MODEL_PRICING: Record<string, { input: number; output: number }> = {
   'grok-3-mini': { input: 0.3, output: 0.5 },
   'grok-2': { input: 2.0, output: 10.0 },
   'grok-2-mini': { input: 0.2, output: 0.4 },
-  // DeepSeek
-  'deepseek-chat': { input: 0.14, output: 0.28 },
-  'deepseek-coder': { input: 0.14, output: 0.28 },
-  'deepseek-reasoner': { input: 0.55, output: 2.19 },
+  // DeepSeek (V3.2 unified pricing — March 2026)
+  'deepseek-chat': { input: 0.28, output: 0.42 },
+  'deepseek-reasoner': { input: 0.28, output: 0.42 },
   // Mistral
   'mistral-large-latest': { input: 2.0, output: 6.0 },
   'codestral-latest': { input: 0.3, output: 0.9 },
