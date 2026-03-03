@@ -126,6 +126,7 @@ export class UsageTracker {
 
     const byProvider: Record<string, { requests: number; tokens: number; cost: number }> = {};
     const byModel: Record<string, { requests: number; tokens: number; cost: number }> = {};
+    const byChannel: Record<string, { requests: number; tokens: number; cost: number }> = {};
 
     let totalTokens = 0;
     let totalCost = 0;
@@ -145,6 +146,13 @@ export class UsageTracker {
       byModel[r.model].requests++;
       byModel[r.model].tokens += r.totalTokens;
       byModel[r.model].cost += r.cost;
+
+      // By channel
+      const channel = r.channelType || 'webchat';
+      if (!byChannel[channel]) byChannel[channel] = { requests: 0, tokens: 0, cost: 0 };
+      byChannel[channel].requests++;
+      byChannel[channel].tokens += r.totalTokens;
+      byChannel[channel].cost += r.cost;
     }
 
     return {
@@ -153,6 +161,7 @@ export class UsageTracker {
       totalCost,
       byProvider,
       byModel,
+      byChannel,
     };
   }
 

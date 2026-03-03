@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { BarChart3, DollarSign, Zap, Clock, RefreshCw, Loader2, Wallet, CheckCircle2, XCircle, TrendingDown } from 'lucide-react';
+import { BarChart3, DollarSign, Zap, Clock, RefreshCw, Loader2, Wallet, CheckCircle2, XCircle, TrendingDown, MessageSquare, Send, Hash } from 'lucide-react';
 
 interface UsageSummary {
   totalRequests: number;
@@ -7,6 +7,20 @@ interface UsageSummary {
   totalCost: number;
   byProvider: Record<string, { requests: number; tokens: number; cost: number }>;
   byModel: Record<string, { requests: number; tokens: number; cost: number }>;
+  byChannel: Record<string, { requests: number; tokens: number; cost: number }>;
+}
+
+const CHANNEL_LABELS: Record<string, { label: string; emoji: string; color: string }> = {
+  webchat: { label: 'Dashboard', emoji: '🖥️', color: 'text-blue-400' },
+  telegram: { label: 'Telegram', emoji: '✈️', color: 'text-sky-400' },
+  whatsapp: { label: 'WhatsApp', emoji: '💬', color: 'text-emerald-400' },
+  discord: { label: 'Discord', emoji: '🎮', color: 'text-indigo-400' },
+  googlechat: { label: 'Google Chat', emoji: '💚', color: 'text-green-400' },
+  companion: { label: 'Companion', emoji: '📱', color: 'text-purple-400' },
+};
+
+function getChannelInfo(channel: string) {
+  return CHANNEL_LABELS[channel] ?? { label: channel, emoji: '📡', color: 'text-zinc-400' };
 }
 
 interface UsageRecord {
@@ -185,8 +199,8 @@ export function UsagePage() {
             </div>
           )}
 
-          {/* By Provider & Model */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          {/* By Provider, Model & Channel */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
             {/* By Provider */}
             <div className="bg-zinc-950/50 border border-zinc-800 rounded-xl p-5">
               <h3 className="text-sm font-semibold text-zinc-400 mb-4">Consumo por Provider</h3>
@@ -232,6 +246,34 @@ export function UsagePage() {
                 <p className="text-sm text-zinc-600">Nenhum dado de uso</p>
               )}
             </div>
+
+            {/* By Channel */}
+            <div className="bg-zinc-950/50 border border-zinc-800 rounded-xl p-5">
+              <h3 className="text-sm font-semibold text-zinc-400 mb-4 flex items-center gap-2">
+                <Send className="w-4 h-4" /> Consumo por Canal
+              </h3>
+              {summary && Object.keys(summary.byChannel ?? {}).length > 0 ? (
+                <div className="space-y-3">
+                  {Object.entries(summary.byChannel).map(([channel, data]) => {
+                    const info = getChannelInfo(channel);
+                    return (
+                      <div key={channel} className="flex items-center justify-between">
+                        <div>
+                          <span className={`text-sm font-medium ${info.color}`}>{info.emoji} {info.label}</span>
+                          <span className="text-xs text-zinc-500 ml-2">{data.requests} req</span>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-sm text-zinc-300">{formatTokens(data.tokens)}</span>
+                          <span className="text-xs text-amber-400 ml-2">{formatCost(data.cost)}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-sm text-zinc-600">Nenhum dado de uso</p>
+              )}
+            </div>
           </div>
 
           {/* Recent Records */}
@@ -245,6 +287,7 @@ export function UsagePage() {
                   <thead>
                     <tr className="border-b border-zinc-800 text-zinc-500 text-xs">
                       <th className="px-4 py-3 text-left font-medium">Hora</th>
+                      <th className="px-4 py-3 text-left font-medium">Canal</th>
                       <th className="px-4 py-3 text-left font-medium">Modelo</th>
                       <th className="px-4 py-3 text-right font-medium">Tokens</th>
                       <th className="px-4 py-3 text-right font-medium">Custo Est.</th>
@@ -255,6 +298,9 @@ export function UsagePage() {
                     {records.map(r => (
                       <tr key={r.id} className="border-b border-zinc-800/50 hover:bg-zinc-800/20">
                         <td className="px-4 py-3 text-zinc-400">{new Date(r.createdAt).toLocaleTimeString()}</td>
+                        <td className="px-4 py-3">
+                          {(() => { const info = getChannelInfo(r.channelType || 'webchat'); return <span className={`text-xs font-medium ${info.color}`}>{info.emoji} {info.label}</span>; })()}
+                        </td>
                         <td className="px-4 py-3 font-mono text-white text-xs">{r.model}</td>
                         <td className="px-4 py-3 text-right text-zinc-300">{formatTokens(r.totalTokens)}</td>
                         <td className="px-4 py-3 text-right text-amber-400">{formatCost(r.cost)}</td>

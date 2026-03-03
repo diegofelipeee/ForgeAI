@@ -93,6 +93,7 @@ export interface UsageSummary {
   totalCost: number;
   byProvider: Record<string, { requests: number; tokens: number; cost: number }>;
   byModel: Record<string, { requests: number; tokens: number; cost: number }>;
+  byChannel: Record<string, { requests: number; tokens: number; cost: number }>;
 }
 
 export interface ModelRoute {
