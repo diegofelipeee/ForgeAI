@@ -8,7 +8,7 @@ const PROVIDER_META: Record<string, { display: string; placeholder: string; mode
   anthropic: { display: 'Anthropic (Claude)', placeholder: 'sk-ant-api03-...', models: 'Opus 4.6, Sonnet 4.6, Haiku 4.5' },
   google: { display: 'Google Gemini', placeholder: 'AIza...', models: 'Gemini 2.5 Pro/Flash, 2.0 Flash' },
   moonshot: { display: 'Kimi (Moonshot)', placeholder: 'sk-...', models: 'Kimi K2.5, moonshot-v1-auto/128k' },
-  deepseek: { display: 'DeepSeek', placeholder: 'sk-...', models: 'DeepSeek Chat, Coder, Reasoner' },
+  deepseek: { display: 'DeepSeek', placeholder: 'sk-...', models: 'DeepSeek Chat (V3.2), Reasoner (V3.2)' },
   groq: { display: 'Groq', placeholder: 'gsk_...', models: 'Llama 3.3 70B, Mixtral 8x7B, Gemma2' },
   mistral: { display: 'Mistral AI', placeholder: 'sk-...', models: 'Mistral Large, Small, Codestral, Pixtral' },
   xai: { display: 'xAI (Grok)', placeholder: 'xai-...', models: 'Grok-4, Grok-3, Grok-2' },

@@ -2027,7 +2027,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
     { name: 'anthropic', displayName: 'Anthropic (Claude)', models: ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-opus-4-5', 'claude-sonnet-4-5-20250929', 'claude-haiku-4-5-20251001', 'claude-sonnet-4-20250514', 'claude-opus-4-20250514'], envKey: 'ANTHROPIC_API_KEY' },
     { name: 'google', displayName: 'Google Gemini', models: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.0-flash-lite'], envKey: 'GOOGLE_API_KEY' },
     { name: 'moonshot', displayName: 'Kimi (Moonshot)', models: ['kimi-k2.5', 'kimi-k2-0711-preview', 'moonshot-v1-auto', 'moonshot-v1-128k'], envKey: 'MOONSHOT_API_KEY' },
-    { name: 'deepseek', displayName: 'DeepSeek', models: ['deepseek-chat', 'deepseek-coder', 'deepseek-reasoner'], envKey: 'DEEPSEEK_API_KEY' },
+    { name: 'deepseek', displayName: 'DeepSeek', models: ['deepseek-chat', 'deepseek-reasoner'], envKey: 'DEEPSEEK_API_KEY' },
     { name: 'groq', displayName: 'Groq', models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768', 'gemma2-9b-it'], envKey: 'GROQ_API_KEY' },
     { name: 'mistral', displayName: 'Mistral AI', models: ['mistral-large-latest', 'mistral-small-latest', 'codestral-latest', 'pixtral-large-latest'], envKey: 'MISTRAL_API_KEY' },
     { name: 'xai', displayName: 'xAI (Grok)', models: ['grok-4', 'grok-3', 'grok-3-mini', 'grok-2'], envKey: 'XAI_API_KEY' },
