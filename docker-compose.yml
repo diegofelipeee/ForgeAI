@@ -14,6 +14,7 @@ services:
     image: mysql:8.0
     container_name: forgeai-mysql
     restart: unless-stopped
+    command: --default-authentication-plugin=mysql_native_password
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD:-forgeai_secret}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-forgeai}
