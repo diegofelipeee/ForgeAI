@@ -6,6 +6,15 @@
 #   1. Add DNS wildcard: *.yourdomain.com → server IP
 #   2. Enable subdomains in Dashboard → Settings → Domain & Sites
 
+# Global options — on-demand TLS permission check
+# Caddy calls this endpoint before issuing a certificate for any subdomain.
+# The Gateway validates whether the subdomain is a registered site/app.
+{
+	on_demand_tls {
+		ask http://localhost:18800/api/caddy/check
+	}
+}
+
 # Main domain — dashboard, API, WebSocket
 {$DOMAIN:localhost} {
 	reverse_proxy localhost:18800

@@ -366,7 +366,7 @@ export class Gateway {
     }
 
     // Paths exempt from rate limiting (health checks, dashboard polling, static assets)
-    const RATE_LIMIT_EXEMPT = new Set(['/health', '/info', '/api/providers', '/api/chat/sessions', '/api/agents', '/api/delegations', '/api/chat/active', '/api/settings/language', '/api/providers/balances']);
+    const RATE_LIMIT_EXEMPT = new Set(['/health', '/info', '/api/providers', '/api/chat/sessions', '/api/agents', '/api/delegations', '/api/chat/active', '/api/settings/language', '/api/providers/balances', '/api/caddy/check']);
     // Also exempt progress polling, session detail, and static dashboard assets
     const RATE_LIMIT_PREFIX_EXEMPT = ['/api/chat/progress/', '/api/chat/sessions/', '/api/files/', '/api/settings/', '/sites/', '/apps/', '/dashboard', '/assets/'];
 
