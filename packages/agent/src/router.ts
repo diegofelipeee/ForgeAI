@@ -163,24 +163,26 @@ export class LLMRouter {
 
   /**
    * Build the ordered fallback chain.
-   * If request has specific provider+model, put that first, then append remaining routes.
+   * If request has specific provider+model, use ONLY that provider.
+   * Cross-provider fallback is disabled when the user explicitly chose a provider,
+   * to avoid confusing errors from providers the user didn't select.
    */
   private buildFallbackChain(request: LLMRequest): ModelRoute[] {
     const sortedRoutes = [...this.routes].sort((a, b) => a.priority - b.priority);
 
     if (request.provider && request.model) {
-      // Requested specific provider — put it first, then add fallback routes
+      // Requested specific provider — use ONLY this provider, no cross-provider fallback
       const specificRoute: ModelRoute = {
         priority: 0,
         provider: request.provider,
         model: request.model,
         fallback: false,
       };
-      // Remove duplicate if it already exists in routes
-      const rest = sortedRoutes.filter(
-        r => !(r.provider === request.provider && r.model === request.model)
+      // Only include same-provider fallback routes (e.g., different models from same provider)
+      const sameProviderFallbacks = sortedRoutes.filter(
+        r => r.provider === request.provider && r.model !== request.model && r.fallback
       );
-      return [specificRoute, ...rest];
+      return [specificRoute, ...sameProviderFallbacks];
     }
 
     return sortedRoutes;
