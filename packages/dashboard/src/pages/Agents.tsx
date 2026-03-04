@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Bot, Plus, Trash2, Pencil, Users, Star, Cpu, X, GitBranch, Clock, Zap, AlertCircle, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
-import { api, type AgentInfo, type DelegationRecord, type TeamInfo } from '@/lib/api';
+import { api, type AgentInfo, type DelegationRecord, type TeamInfo, type ProviderInfo } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 interface NewAgentForm {
@@ -22,11 +22,29 @@ export function AgentsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [providerModels, setProviderModels] = useState<Record<string, string[]>>({});
 
   const refresh = useCallback(() => {
     api.getAgents().then(d => { setAgents(d.agents); setTeams(d.teams ?? []); }).catch(() => {});
     api.getDelegations().then(d => setDelegations(d.delegations ?? [])).catch(() => {});
   }, []);
+
+  // Fetch configured providers on mount
+  useEffect(() => {
+    api.getProviders().then(r => setProviders(r.providers.filter(p => p.configured))).catch(() => {});
+  }, []);
+
+  // Fetch models when provider changes
+  const handleProviderChange = useCallback(async (providerName: string) => {
+    setForm(f => ({ ...f, provider: providerName, model: '' }));
+    if (!providerName || providerModels[providerName]) return;
+    try {
+      const res = await fetch(`/api/providers/${providerName}/models`);
+      const data = await res.json() as { models: string[] };
+      setProviderModels(m => ({ ...m, [providerName]: data.models ?? [] }));
+    } catch { /* ignore */ }
+  }, [providerModels]);
 
   useEffect(() => { refresh(); }, [refresh]);
   // Auto-refresh every 10s for live team status
@@ -67,6 +85,8 @@ export function AgentsPage() {
       await api.updateAgent(id, {
         name: form.name.trim() || undefined,
         persona: form.persona.trim() || undefined,
+        model: form.model.trim() || undefined,
+        provider: form.provider.trim() || undefined,
       });
       setEditingId(null);
       setForm(EMPTY_FORM);
@@ -88,10 +108,18 @@ export function AgentsPage() {
     }
   };
 
-  const startEdit = (agent: AgentInfo) => {
+  const startEdit = async (agent: AgentInfo) => {
     setEditingId(agent.id);
     setForm({ id: agent.id, name: agent.name, persona: '', model: agent.model, provider: agent.provider });
     setShowForm(false);
+    // Pre-load models for the agent's current provider
+    if (agent.provider && !providerModels[agent.provider]) {
+      try {
+        const res = await fetch(`/api/providers/${agent.provider}/models`);
+        const data = await res.json() as { models: string[] };
+        setProviderModels(m => ({ ...m, [agent.provider]: data.models ?? [] }));
+      } catch { /* ignore */ }
+    }
   };
 
   return (
@@ -152,38 +180,41 @@ export function AgentsPage() {
               <label className="block text-xs text-zinc-400 mb-1">Provider (opcional)</label>
               <select
                 value={form.provider}
-                onChange={e => setForm({ ...form, provider: e.target.value })}
+                onChange={e => handleProviderChange(e.target.value)}
                 title="Selecionar provider"
                 className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-700 text-sm text-white focus:border-forge-500 focus:outline-none"
               >
                 <option value="">Mesmo do default</option>
-                <option value="anthropic">Anthropic</option>
-                <option value="openai">OpenAI</option>
-                <option value="google">Google</option>
-                <option value="moonshot">Moonshot (Kimi)</option>
-                <option value="deepseek">DeepSeek</option>
-                <option value="groq">Groq</option>
-                <option value="mistral">Mistral</option>
-                <option value="xai">xAI (Grok)</option>
-                <option value="local">Local LLM (Ollama)</option>
+                {providers.map(p => (
+                  <option key={p.name} value={p.name}>{p.displayName}</option>
+                ))}
               </select>
+              {providers.length === 0 && (
+                <p className="text-[10px] text-amber-400/70 mt-1">Nenhum provider configurado. Configure em Settings primeiro.</p>
+              )}
             </div>
             <div>
               <label className="block text-xs text-zinc-400 mb-1">Modelo (opcional)</label>
-              <input
+              <select
                 value={form.model}
                 onChange={e => setForm({ ...form, model: e.target.value })}
-                placeholder="ex: gpt-4o, claude-sonnet-4-20250514"
-                className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-700 text-sm text-white placeholder-zinc-500 focus:border-forge-500 focus:outline-none"
-              />
+                title="Selecionar modelo"
+                className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-700 text-sm text-white focus:border-forge-500 focus:outline-none"
+                disabled={!form.provider}
+              >
+                <option value="">{form.provider ? 'Selecione um modelo' : 'Selecione o provider primeiro'}</option>
+                {(providerModels[form.provider] ?? []).map(m => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
             </div>
           </div>
           <div className="mb-4">
-            <label className="block text-xs text-zinc-400 mb-1">Persona / System Prompt</label>
+            <label className="block text-xs text-zinc-400 mb-1">Persona / System Prompt <span className="text-zinc-500">(opcional — se vazio, usa o prompt padrão do ForgeAI)</span></label>
             <textarea
               value={form.persona}
               onChange={e => setForm({ ...form, persona: e.target.value })}
-              placeholder="Descreva a personalidade e especialidade deste agente..."
+              placeholder="Opcional: descreva a personalidade e especialidade deste agente. Deixe vazio para usar o system prompt padrão."
               rows={3}
               className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-700 text-sm text-white placeholder-zinc-500 focus:border-forge-500 focus:outline-none resize-none"
             />
@@ -222,18 +253,53 @@ export function AgentsPage() {
               /* Edit mode */
               <div>
                 <div className="grid grid-cols-2 gap-3 mb-3">
-                  <input
-                    value={form.name}
-                    onChange={e => setForm({ ...form, name: e.target.value })}
-                    placeholder="Nome"
-                    className="px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-700 text-sm text-white focus:border-forge-500 focus:outline-none"
-                  />
-                  <input
-                    value={form.persona}
-                    onChange={e => setForm({ ...form, persona: e.target.value })}
-                    placeholder="Persona (opcional)"
-                    className="px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-700 text-sm text-white focus:border-forge-500 focus:outline-none"
-                  />
+                  <div>
+                    <label className="block text-[10px] text-zinc-500 mb-1">Nome</label>
+                    <input
+                      value={form.name}
+                      onChange={e => setForm({ ...form, name: e.target.value })}
+                      placeholder="Nome"
+                      className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-700 text-sm text-white focus:border-forge-500 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-zinc-500 mb-1">Provider</label>
+                    <select
+                      value={form.provider}
+                      onChange={e => handleProviderChange(e.target.value)}
+                      title="Selecionar provider"
+                      className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-700 text-sm text-white focus:border-forge-500 focus:outline-none"
+                    >
+                      <option value="">Mesmo do default</option>
+                      {providers.map(p => (
+                        <option key={p.name} value={p.name}>{p.displayName}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-zinc-500 mb-1">Modelo</label>
+                    <select
+                      value={form.model}
+                      onChange={e => setForm({ ...form, model: e.target.value })}
+                      title="Selecionar modelo"
+                      className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-700 text-sm text-white focus:border-forge-500 focus:outline-none"
+                      disabled={!form.provider}
+                    >
+                      <option value="">{form.provider ? 'Selecione um modelo' : 'Selecione o provider primeiro'}</option>
+                      {(providerModels[form.provider] ?? []).map(m => (
+                        <option key={m} value={m}>{m}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-zinc-500 mb-1">Persona <span className="text-zinc-600">(opcional)</span></label>
+                    <input
+                      value={form.persona}
+                      onChange={e => setForm({ ...form, persona: e.target.value })}
+                      placeholder="Deixe vazio para usar o padrão"
+                      className="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-700 text-sm text-white placeholder-zinc-600 focus:border-forge-500 focus:outline-none"
+                    />
+                  </div>
                 </div>
                 <div className="flex gap-2">
                   <button onClick={() => handleUpdate(agent.id)} disabled={loading}
