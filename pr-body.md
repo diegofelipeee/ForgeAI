@@ -1,10 +1,10 @@
 ## Description
 
-Upgrade PromptOptimizer to schema v2 with pattern deduplication and aggregation. Replaces naive array storage with fingerprint-based dedup (SHA-256 patternId) and running-average aggregation. Includes automatic v1→v2 migration so existing instances upgrade seamlessly.
+Agents page: dynamic provider/model selection from configured LLMs. Providers configured in Settings now appear automatically in Agents. Model dropdown loads available models per provider via API. System prompt field clearly indicates it's optional (uses default if empty).
 
 ## Type of Change
 
-- [ ] Bug fix
+- [x] Bug fix
 - [x] New feature
 - [ ] Refactor (no functional changes)
 - [ ] Documentation
@@ -13,37 +13,39 @@ Upgrade PromptOptimizer to schema v2 with pattern deduplication and aggregation.
 
 ## Changes Made
 
-- **Schema versioning** (`packages/agent/src/prompt-optimizer.ts`):
-  - `CURRENT_SCHEMA_VERSION = 2` constant
-  - `save()` writes version 2 payload
-  - `load()` detects v1 data and auto-migrates (backfills `patternId`, `occurrences`, `avgScore`, `avgDuration`, `avgIterations`, `firstSeen`, `lastSeen`)
-  - Unknown versions are safely skipped with a warning
+- **Dynamic provider list** (`packages/dashboard/src/pages/Agents.tsx`):
+  - Fetches configured providers from `/api/providers` on mount (only `configured: true`)
+  - Provider dropdown in create and edit forms shows only configured LLMs
+  - Warning message when no providers are configured
 
-- **Pattern dedup + aggregation**:
-  - `generatePatternId(category, toolSequence, keyActions)` — SHA-256 fingerprint for success patterns
-  - `generateFailurePatternId(category, failedTools)` — SHA-256 fingerprint for failure patterns
-  - `recordOutcome()` — if patternId already exists, aggregates (running averages) instead of creating duplicate
-  - `deduplicatePatterns()` — merges any remaining duplicates after migration
-  - `pruneSuccessPatterns()` — ranks by `avgScore * recency * confidence` (log-scale confidence boost for multi-occurrence patterns)
+- **Dynamic model loading**:
+  - When a provider is selected, models are fetched from `/api/providers/:name/models`
+  - Model field changed from free-text `<input>` to `<select>` dropdown
+  - Models are cached per provider to avoid redundant API calls
+  - Model resets when provider changes
 
-- **Improved ranking**:
-  - `getRelevantPatterns()` — ranks by `avgScore * timeDecay * confidenceBoost` using `lastSeen` instead of `timestamp`
-  - `buildOptimizedContext()` — shows `[Nx proven]` badge and avg metrics in injected context
+- **Edit mode improvements**:
+  - Edit form now includes provider and model dropdowns (previously only name/persona)
+  - `handleUpdate` sends model and provider changes to API
+  - Pre-loads models for agent's current provider when entering edit mode
 
-- **Enhanced stats**:
-  - `getStats()` now returns `totalObservations`, `avgPatternOccurrences`, and `topPatterns` (top 5 by score*occurrences)
+- **UX: Optional system prompt**:
+  - Label shows "(opcional — se vazio, usa o prompt padrão do ForgeAI)"
+  - Placeholder explains it's optional and defaults to the standard prompt
 
 ## How to Test
 
-1. `pnpm -r build` + `pnpm test`
-2. Deploy and run several agent tasks in the same category
-3. Check `prompt-optimizer.json` — patterns should aggregate (occurrences > 1) instead of duplicating
-4. Existing v1 data files auto-migrate on first load (check logs for "Migrating optimizer data v1 → v2")
+1. `pnpm -r build`
+2. Configure a provider API key in Settings
+3. Go to Agents → click "+ Novo Agente"
+4. Provider dropdown should list only configured providers
+5. Select a provider → Model dropdown should populate with that provider's models
+6. Leave Persona empty → confirm placeholder indicates it's optional
+7. Edit an existing agent → confirm provider/model dropdowns work
 
 ## Checklist
 
 - [x] Code builds without errors (`pnpm -r build`)
-- [x] Tests pass (`pnpm test`)
 - [x] Commit messages follow Conventional Commits
 - [x] No secrets or API keys committed
-- [x] Backward compatible (v1 data auto-migrates)
+- [x] Backward compatible
