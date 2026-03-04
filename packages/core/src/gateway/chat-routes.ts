@@ -3579,6 +3579,61 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
     return { domain: null, subdomainsEnabled: false, baseUrl: resolvePublicUrl(vault).baseUrl };
   });
 
+  // ─── Caddy On-Demand TLS Check ─────────────────────
+  // Caddy calls this endpoint before issuing a certificate for a subdomain.
+  // Returns 200 if the subdomain is a valid site/app, 404 otherwise.
+  app.get('/api/caddy/check', async (request: FastifyRequest, reply: FastifyReply) => {
+    const { domain: queryDomain } = request.query as { domain?: string };
+    if (!queryDomain) {
+      reply.status(400).send('missing domain parameter');
+      return;
+    }
+
+    // Get configured domain from vault
+    const configuredDomain = vault?.isInitialized() ? (vault.get('config:domain') || '') : '';
+    if (!configuredDomain) {
+      reply.status(404).send('no domain configured');
+      return;
+    }
+
+    // Allow the main domain itself
+    if (queryDomain === configuredDomain) {
+      reply.status(200).send('ok');
+      return;
+    }
+
+    // Check if it's a valid subdomain of our domain
+    if (!queryDomain.endsWith(`.${configuredDomain}`)) {
+      reply.status(404).send('not our domain');
+      return;
+    }
+
+    // Extract subdomain name
+    const subdomain = queryDomain.slice(0, queryDomain.length - configuredDomain.length - 1);
+    if (!subdomain || subdomain.includes('.')) {
+      reply.status(404).send('invalid subdomain');
+      return;
+    }
+
+    // Check if subdomain is a registered app
+    if (appRegistry.has(subdomain)) {
+      reply.status(200).send('ok');
+      return;
+    }
+
+    // Check if subdomain is a workspace site directory
+    const { resolve } = await import('node:path');
+    const { existsSync, statSync } = await import('node:fs');
+    const workspaceDir = resolve(process.cwd(), '.forgeai', 'workspace');
+    const siteDir = resolve(workspaceDir, subdomain);
+    if (existsSync(siteDir) && statSync(siteDir).isDirectory()) {
+      reply.status(200).send('ok');
+      return;
+    }
+
+    reply.status(404).send('unknown subdomain');
+  });
+
   // ─── Delete Static Site ─────────────────────────────
   app.delete('/api/sites/:name', async (request: FastifyRequest, reply: FastifyReply) => {
     const { name } = request.params as { name: string };
