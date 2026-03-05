@@ -882,7 +882,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
           timestamp: new Date().toISOString(),
         }, channelMeta);
 
-        // Send initial status message — will be updated with real progress
+        // Send initial status message — will be updated with a running progress log
         await telegramChannel!.sendTyping(chatId);
         let statusMsgId = await telegramChannel!.sendStatusMessage(
           chatId,
@@ -892,7 +892,31 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
         let lastStatusUpdate = Date.now();
         let lastStatusText = '';
 
-        // Register progress listener: broadcast to WS + update Telegram status msg
+        // Running log of agent steps — accumulates instead of showing only the latest
+        const progressLines: string[] = [];
+        let currentIteration = 0;
+        let maxIterations = 50;
+
+        // Helper: build a short preview of tool arguments for the progress log
+        const toolArgsPreview = (tool: string, args?: Record<string, unknown>): string => {
+          if (!args) return '';
+          if (tool === 'shell_exec') return String(args.command || '').substring(0, 70);
+          if (tool === 'file_manager') {
+            const act = args.action || args.operation || '';
+            const p = args.path || args.file || '';
+            return `${act} ${p}`.trim().substring(0, 70);
+          }
+          if (tool === 'web_browse' || tool === 'browser') return String(args.url || '').substring(0, 70);
+          if (tool === 'code_run') return 'running code...';
+          if (tool === 'plan_create') return String(args.goal || '').substring(0, 60);
+          if (tool === 'plan_update') return `step ${args.stepId ?? '?'}: ${args.status || ''}`.substring(0, 60);
+          if (tool === 'app_register') return String(args.name || '').substring(0, 60);
+          // Generic: first meaningful arg
+          const first = Object.entries(args).find(([k]) => !k.startsWith('_'));
+          return first ? String(first[1]).substring(0, 50) : '';
+        };
+
+        // Register progress listener: broadcast to WS + update Telegram status log
         const wsBroadcaster = getWSBroadcaster();
         const targetAgent = agentManager.getDefaultAgent();
         let lastTyping = Date.now();
@@ -906,28 +930,38 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
             telegramChannel!.sendTyping(chatId).catch(() => {});
           }
 
-          // Update Telegram status message with real progress (throttled to every 3s)
-          if (statusMsgId && Date.now() - lastStatusUpdate > 3000) {
-            let newText = '';
-            const evType = event.type as string;
-            if (evType === 'step') {
-              const step = event.step as { type: string; message?: string; tool?: string } | undefined;
-              if (step?.type === 'thinking' && step.message) {
-                const thought = step.message.length > 200 ? step.message.substring(0, 200) + '...' : step.message;
-                newText = `💭 ${thought}`;
-              } else if (step?.type === 'tool_call' && step.tool) {
-                newText = `⚙️ Executando: ${step.tool}`;
-              }
-            } else if (evType === 'progress') {
-              const p = event.progress as { status: string; iteration: number; maxIterations: number; currentTool?: string } | undefined;
-              if (p?.status === 'calling_tool' && p.currentTool) {
-                newText = `⚙️ [${p.iteration}/${p.maxIterations}] ${p.currentTool}`;
-              } else if (p?.status === 'thinking') {
-                newText = `💭 [${p.iteration}/${p.maxIterations}] Pensando...`;
+          // Accumulate steps into the running log
+          const evType = event.type as string;
+          if (evType === 'step') {
+            const step = event.step as { type: string; message?: string; tool?: string; args?: Record<string, unknown>; success?: boolean; duration?: number } | undefined;
+            if (step?.type === 'tool_call' && step.tool) {
+              const preview = toolArgsPreview(step.tool, step.args);
+              progressLines.push(`⚙️ ${step.tool}${preview ? ': ' + preview : ''}`);
+            } else if (step?.type === 'tool_result' && progressLines.length > 0) {
+              // Mark the last tool_call line with success/failure
+              const lastIdx = progressLines.length - 1;
+              const last = progressLines[lastIdx];
+              if (last.startsWith('⚙️')) {
+                progressLines[lastIdx] = last.replace('⚙️', step.success !== false ? '✅' : '❌');
               }
             }
+          } else if (evType === 'progress') {
+            const p = event.progress as { status: string; iteration: number; maxIterations: number } | undefined;
+            if (p) {
+              currentIteration = p.iteration;
+              maxIterations = p.maxIterations;
+            }
+          }
 
-            if (newText && newText !== lastStatusText) {
+          // Update the status message with the running log (throttled to 2s)
+          if (statusMsgId && Date.now() - lastStatusUpdate > 2000 && progressLines.length > 0) {
+            const header = `📋 Progresso [${currentIteration}/${maxIterations}]:`;
+            // Show last 15 lines to stay under Telegram's 4096 char limit
+            const visible = progressLines.slice(-15);
+            const body = visible.join('\n');
+            const newText = `${header}\n${body}`;
+
+            if (newText !== lastStatusText) {
               lastStatusUpdate = Date.now();
               lastStatusText = newText;
               telegramChannel!.editMessage(chatId, statusMsgId, newText).catch(() => {});
@@ -951,8 +985,15 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
           targetAgent.offProgress(sessionId, tgProgressListener as any);
         }
 
-        // Delete the status message now that we have the real response
-        if (statusMsgId) {
+        // Edit the status message into a final summary instead of deleting it
+        if (statusMsgId && progressLines.length > 0) {
+          const totalTools = progressLines.filter(l => l.startsWith('✅') || l.startsWith('❌')).length;
+          const failures = progressLines.filter(l => l.startsWith('❌')).length;
+          const summaryHeader = `📋 Concluido (${totalTools} acoes${failures ? `, ${failures} erro(s)` : ''}):`;
+          const visible = progressLines.slice(-15);
+          const summaryText = `${summaryHeader}\n${visible.join('\n')}`;
+          await telegramChannel!.editMessage(chatId, statusMsgId, summaryText).catch(() => {});
+        } else if (statusMsgId) {
           await telegramChannel!.deleteMessage(chatId, statusMsgId);
         }
 
