@@ -7,7 +7,7 @@ import makeWASocket, {
   downloadMediaMessage,
   type WASocket,
 } from '@whiskeysockets/baileys';
-import { generateId } from '@forgeai/shared';
+import { generateId, resolveForgeAIRoot } from '@forgeai/shared';
 import type { InboundMessage, OutboundMessage } from '@forgeai/shared';
 import { BaseChannel } from './base.js';
 
@@ -36,7 +36,7 @@ export class WhatsAppChannel extends BaseChannel {
     this.allowedUsers = new Set(config.allowFrom ?? []);
     this.allowedGroups = new Set(config.allowGroups ?? []);
     this.adminUsers = new Set(config.adminUsers ?? []);
-    this.sessionPath = config.sessionPath ?? resolve(process.cwd(), '.forgeai', 'whatsapp-session');
+    this.sessionPath = config.sessionPath ?? resolve(resolveForgeAIRoot(), 'whatsapp-session');
     this.store = makeInMemoryStore({});
 
     // Ensure session directory exists

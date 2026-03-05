@@ -5,7 +5,7 @@ import { randomBytes } from 'node:crypto';
 import { createGateway } from '@forgeai/core';
 import { initDatabase, runMigrations } from '@forgeai/core';
 import { MySQLAuditStore } from '@forgeai/core';
-import { APP_NAME } from '@forgeai/shared';
+import { APP_NAME, resolveForgeAIRoot } from '@forgeai/shared';
 
 const DEFAULT_SECRETS = ['change-me-to-a-random-jwt-secret', 'change-me-to-a-strong-password', 'change-me-to-a-random-secret'];
 
@@ -59,7 +59,7 @@ export function registerStartCommand(program: Command): void {
     .action(async (options: { host: string; port: string; migrate: boolean; verbose: boolean }) => {
       console.log(`\n🔥 Starting ${APP_NAME} Gateway...\n`);
 
-      const forgeDir = resolve(process.cwd(), '.forgeai');
+      const forgeDir = resolveForgeAIRoot();
       const { jwtSecret, vaultPassword } = resolveSecrets(forgeDir);
 
       try {
@@ -87,7 +87,7 @@ export function registerStartCommand(program: Command): void {
         gateway.auditLogger.setStore(auditStore);
 
         // Initialize vault with file persistence
-        const vaultFilePath = resolve(process.cwd(), '.forgeai', 'vault.json');
+        const vaultFilePath = resolve(resolveForgeAIRoot(), 'vault.json');
         console.log('🔐 Initializing Vault...');
         await gateway.vault.initialize(vaultPassword, undefined, vaultFilePath);
 

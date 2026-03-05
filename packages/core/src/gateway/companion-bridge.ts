@@ -10,7 +10,7 @@
  * 5. Bridge resolves the Promise, agent continues with the result
  */
 
-import { createLogger, generateId } from '@forgeai/shared';
+import { createLogger, generateId, resolveForgeAIRoot } from '@forgeai/shared';
 import type { ToolExecutor } from '@forgeai/agent';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -252,7 +252,7 @@ export class CompanionToolExecutor implements ToolExecutor {
         try {
           const parsed = JSON.parse(result.output);
           if (parsed.image_base64 && parsed.filename) {
-            const screenshotDir = resolve(process.cwd(), '.forgeai', 'screenshots');
+            const screenshotDir = resolve(resolveForgeAIRoot(), 'screenshots');
             if (!existsSync(screenshotDir)) mkdirSync(screenshotDir, { recursive: true });
             savedFilename = parsed.filename;
             savedPath = resolve(screenshotDir, savedFilename!);

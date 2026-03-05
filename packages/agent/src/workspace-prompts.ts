@@ -1,6 +1,6 @@
-import { createLogger } from '@forgeai/shared';
+import { createLogger, resolveWorkspaceRoot } from '@forgeai/shared';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
-import { resolve, join } from 'node:path';
+import { join } from 'node:path';
 
 const logger = createLogger('Agent:WorkspacePrompts');
 
@@ -101,7 +101,7 @@ export interface LoadedPrompts {
  * from the workspace directory. Creates templates if they don't exist.
  */
 export function loadWorkspacePrompts(config?: WorkspacePromptsConfig): LoadedPrompts {
-  const workspacePath = config?.workspacePath ?? resolve(process.cwd(), '.forgeai', 'workspace');
+  const workspacePath = config?.workspacePath ?? resolveWorkspaceRoot();
 
   // Ensure workspace exists
   if (!existsSync(workspacePath)) {

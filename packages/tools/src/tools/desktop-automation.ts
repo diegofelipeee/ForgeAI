@@ -3,12 +3,13 @@ import { resolve } from 'node:path';
 import { existsSync, mkdirSync } from 'node:fs';
 import { BaseTool } from '../base.js';
 import type { ToolDefinition, ToolResult } from '../base.js';
+import { resolveForgeAIRoot } from '@forgeai/shared';
 
 const IS_WINDOWS = process.platform === 'win32';
 const IS_MACOS = process.platform === 'darwin';
 const IS_LINUX = process.platform === 'linux';
 const IS_WAYLAND = !IS_WINDOWS && !IS_MACOS && !!process.env['WAYLAND_DISPLAY'];
-const SCREENSHOT_DIR = resolve(process.cwd(), '.forgeai', 'screenshots');
+const SCREENSHOT_DIR = resolve(resolveForgeAIRoot(), 'screenshots');
 const MAX_OUTPUT = 128 * 1024;
 
 // ─── Dependency detection for Linux ───

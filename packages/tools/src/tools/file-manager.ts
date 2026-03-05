@@ -3,6 +3,7 @@ import { readFile, writeFile, readdir, stat, mkdir, unlink, rm, rename, copyFile
 import { existsSync } from 'node:fs';
 import { BaseTool } from '../base.js';
 import type { ToolDefinition, ToolResult } from '../base.js';
+import { resolveWorkspaceRoot } from '@forgeai/shared';
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 const IS_WINDOWS = process.platform === 'win32';
@@ -67,10 +68,7 @@ On Windows: silent operations without opening any visible window.`,
 
   constructor(workspaceRoot?: string) {
     super();
-    this.workspaceRoot = workspaceRoot || resolve(process.cwd(), '.forgeai', 'workspace');
-    if (!existsSync(this.workspaceRoot)) {
-      mkdir(this.workspaceRoot, { recursive: true }).catch(() => {});
-    }
+    this.workspaceRoot = workspaceRoot || resolveWorkspaceRoot();
   }
 
   private resolvePath(filePath: string): string {

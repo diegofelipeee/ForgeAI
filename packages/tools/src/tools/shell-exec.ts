@@ -4,7 +4,7 @@ import { mkdir } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { BaseTool } from '../base.js';
 import type { ToolDefinition, ToolResult } from '../base.js';
-import { DEFAULT_GATEWAY_PORT, DEFAULT_WS_PORT } from '@forgeai/shared';
+import { DEFAULT_GATEWAY_PORT, DEFAULT_WS_PORT, resolveWorkspaceRoot } from '@forgeai/shared';
 
 // ─── Security: hard-blocked patterns that would DESTROY the OS ───
 // Only truly catastrophic, irreversible commands. Everything else is allowed.
@@ -179,10 +179,7 @@ Security: destructive OS-level commands (format C:, rm -rf /, fork bombs) are bl
 
   constructor(workDir?: string) {
     super();
-    this.workDir = workDir || resolve(process.cwd(), '.forgeai', 'workspace');
-    if (!existsSync(this.workDir)) {
-      mkdir(this.workDir, { recursive: true }).catch(() => {});
-    }
+    this.workDir = workDir || resolveWorkspaceRoot();
   }
 
   async execute(params: Record<string, unknown>): Promise<ToolResult> {

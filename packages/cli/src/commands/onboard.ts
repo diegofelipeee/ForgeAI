@@ -2,7 +2,7 @@ import type { Command } from 'commander';
 import { resolve } from 'node:path';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
-import { APP_NAME } from '@forgeai/shared';
+import { APP_NAME, resolveWorkspaceRoot, resolveForgeAIRoot } from '@forgeai/shared';
 
 // Dynamic imports for ESM-only packages
 async function loadChalk() {
@@ -29,9 +29,9 @@ export function registerOnboardCommand(program: Command): void {
       const ora = await loadOra();
       const inquirer = await loadInquirer();
 
-      const forgeDir = resolve(process.cwd(), '.forgeai');
+      const forgeDir = resolveForgeAIRoot();
       const envPath = resolve(process.cwd(), '.env');
-      const workspacePath = resolve(forgeDir, 'workspace');
+      const workspacePath = resolveWorkspaceRoot();
 
       // ─── Banner ────────────────────────────
       console.log('');
