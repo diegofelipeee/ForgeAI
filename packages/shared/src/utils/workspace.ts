@@ -21,8 +21,7 @@ export function resolveWorkspaceRoot(): string {
     return custom;
   }
 
-  const home = homedir();
-  const workspace = resolve(home, '.forgeai', 'workspace');
+  const workspace = resolve(resolveForgeAIRoot(), 'workspace');
   ensureDir(workspace);
   return workspace;
 }
