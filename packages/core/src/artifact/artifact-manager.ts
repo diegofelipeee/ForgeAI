@@ -1,8 +1,9 @@
 import { resolve } from 'node:path';
 import { mkdirSync, existsSync, writeFileSync, readFileSync, readdirSync, unlinkSync } from 'node:fs';
 import type { Artifact, CreateArtifactRequest, UpdateArtifactRequest, ArtifactEvent } from '@forgeai/shared';
+import { resolveForgeAIRoot } from '@forgeai/shared';
 
-const ARTIFACTS_DIR = resolve(process.cwd(), '.forgeai', 'artifacts');
+const ARTIFACTS_DIR = resolve(resolveForgeAIRoot(), 'artifacts');
 
 function generateId(): string {
   return `art_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;

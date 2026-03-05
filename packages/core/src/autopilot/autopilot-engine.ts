@@ -1,4 +1,4 @@
-import { createLogger } from '@forgeai/shared';
+import { createLogger, resolveForgeAIRoot } from '@forgeai/shared';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 
@@ -85,7 +85,7 @@ export class AutopilotEngine {
     this.config = {
       enabled: config?.enabled ?? true,
       intervalMinutes: config?.intervalMinutes ?? 30,
-      filePath: config?.filePath ?? resolve(process.cwd(), '.forgeai', 'AUTOPILOT.md'),
+      filePath: config?.filePath ?? resolve(resolveForgeAIRoot(), 'AUTOPILOT.md'),
       deliverTo: config?.deliverTo,
     };
   }

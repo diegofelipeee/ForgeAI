@@ -1,7 +1,7 @@
 import { resolve } from 'node:path';
 import { readFile, writeFile, readdir, mkdir, unlink } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { createLogger, generateId } from '@forgeai/shared';
+import { createLogger, generateId, resolveForgeAIRoot } from '@forgeai/shared';
 import type { SessionRecording, RecordingEvent, RecordingStats, RecordingSummary } from '@forgeai/shared';
 
 const logger = createLogger('Core:SessionRecorder');
@@ -18,7 +18,7 @@ export class SessionRecorder {
   private listeners: Array<(event: string, recording: SessionRecording) => void> = [];
 
   constructor(baseDir?: string) {
-    this.dir = baseDir || resolve(process.cwd(), '.forgeai', 'recordings');
+    this.dir = baseDir || resolve(resolveForgeAIRoot(), 'recordings');
     this.ensureDir();
     logger.info('Session recorder initialized', { dir: this.dir });
   }

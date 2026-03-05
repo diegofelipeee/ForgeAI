@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { createLogger, generateId, UserRole } from '@forgeai/shared';
+import { createLogger, generateId, UserRole, resolveWorkspaceRoot, resolveForgeAIRoot } from '@forgeai/shared';
 import type { AgentConfig } from '@forgeai/shared';
 import { AgentRuntime, AgentManager, createAgentManager, createLLMRouter } from '@forgeai/agent';
 import { getWSBroadcaster } from './ws-broadcaster.js';
@@ -12,7 +12,6 @@ import { createPluginManager, AutoResponderPlugin, ContentFilterPlugin, ChatComm
 import { createVoiceEngine, type VoiceEngine, createMCPClient, type MCPClient, createMemoryManager, type MemoryManager, createRAGEngine, type RAGEngine, extractTextFromFile, createAutoPlanner, type AutoPlanner, createWakeWordManager, type WakeWordManager, createPromptOptimizer, createForgeTeamEngine, getActiveTeams } from '@forgeai/agent';
 import { createOAuth2Manager, type OAuth2Manager, createAPIKeyManager, type APIKeyManager, createGDPRManager, type GDPRManager } from '@forgeai/security';
 import { createGitHubIntegration, type GitHubIntegration, createRSSFeedManager, type RSSFeedManager, createGmailIntegration, type GmailIntegration, createCalendarIntegration, type CalendarIntegration, createNotionIntegration, type NotionIntegration, createHomeAssistantIntegration, type HomeAssistantIntegration, setHomeAssistantRef, createSpotifyIntegration, type SpotifyIntegration, setSpotifyRef } from '@forgeai/tools';
-import { resolve as pathResolveSync } from 'node:path';
 import { createWebhookManager, type WebhookManager } from '../webhooks/webhook-manager.js';
 import { createAppManager, type AppManager, generateAppDownPage } from './app-manager.js';
 import { createWorkflowEngine, type WorkflowEngine } from '@forgeai/workflows';
@@ -75,9 +74,9 @@ const userChannelMap = new Map<string, { channelType: string; chatId: string }>(
 
 // ─── App Registry: maps app name → port for subdomain routing ───
 // Allows agent-created apps to be accessed via subdomain (e.g., painel.domain.com → port 3456)
-const appRegistry = new Map<string, { port: number; name: string; createdAt: string; description?: string }>();
+const appRegistry = new Map<string, { port: number; name: string; createdAt: string; description?: string; cwd?: string; command?: string; args?: string[] }>();
 
-export function getAppRegistry(): Map<string, { port: number; name: string; createdAt: string; description?: string }> {
+export function getAppRegistry(): Map<string, { port: number; name: string; createdAt: string; description?: string; cwd?: string; command?: string; args?: string[] }> {
   return appRegistry;
 }
 
@@ -302,7 +301,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
   try {
     const { resolve: pathResolve } = await import('node:path');
     const { readFileSync, unlinkSync, existsSync } = await import('node:fs');
-    const onboardPath = pathResolve(process.cwd(), '.forgeai', 'onboard-provider.json');
+    const onboardPath = pathResolve(resolveForgeAIRoot(), 'onboard-provider.json');
     if (existsSync(onboardPath)) {
       const raw = JSON.parse(readFileSync(onboardPath, 'utf-8'));
       if (raw.provider && raw.apiKey) {
@@ -457,12 +456,12 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
   agentManager.setProgressBroadcaster((parentSessionId, event) => {
     const wsBroadcaster = getWSBroadcaster();
     if (wsBroadcaster) {
-      wsBroadcaster.broadcastToSession(parentSessionId, { ...event } as unknown as Record<string, unknown>);
+      wsBroadcaster.broadcastToSession(parentSessionId, event as unknown as Record<string, unknown>);
     }
   });
 
   // Wire ProjectDelete tool with app registry, app manager, and vault
-  const workspaceRoot = pathResolveSync(process.cwd(), '.forgeai', 'workspace');
+  const workspaceRoot = resolveWorkspaceRoot();
   setProjectDeleteRefs({
     appRegistry: appRegistry as any,
     appManager: appManager ?? null,
@@ -1088,7 +1087,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
   // Só inicializa se tiver sessão existente ou se foi habilitado via Vault
   const waEnabled = vault?.isInitialized() && vault.has('channel:whatsapp:enabled');
   const waSessionExists = (await import('node:fs')).existsSync(
-    (await import('node:path')).resolve(process.cwd(), '.forgeai', 'whatsapp-session', 'creds.json')
+    (await import('node:path')).resolve(resolveForgeAIRoot(), 'whatsapp-session', 'creds.json')
   );
 
   if (waEnabled || waSessionExists) {
@@ -2647,7 +2646,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
     if (!urlPath) { reply.status(400).send({ error: 'No path' }); return; }
 
     // Allow serving from .forgeai/screenshots/ and .forgeai/workspace/
-    const baseDir = resolve(process.cwd(), '.forgeai');
+    const baseDir = resolveForgeAIRoot();
     const filePath = normalize(resolve(baseDir, urlPath));
 
     // Security: prevent directory traversal
@@ -2685,7 +2684,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
     const { createReadStream, existsSync, statSync } = await import('node:fs');
     const urlPath = (request.params as { '*': string })['*'] || '';
 
-    const workspaceDir = resolve(process.cwd(), '.forgeai', 'workspace');
+    const workspaceDir = resolveWorkspaceRoot();
     let filePath = normalize(resolve(workspaceDir, urlPath));
 
     // Security: prevent directory traversal
@@ -2823,19 +2822,16 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
       if (request.headers['accept']) headers['accept'] = request.headers['accept'] as string;
       if (request.headers['authorization']) headers['authorization'] = request.headers['authorization'] as string;
 
-      const fetchOpts: RequestInit = {
-        method,
-        headers,
-        // @ts-ignore - body forwarding
-        body: method !== 'GET' && method !== 'HEAD' ? JSON.stringify(request.body) : undefined,
-      };
-
-      if (method !== 'GET' && method !== 'HEAD' && request.headers['content-type']?.includes('application/json')) {
-        fetchOpts.body = JSON.stringify(request.body);
-      } else if (method !== 'GET' && method !== 'HEAD') {
-        fetchOpts.body = request.body as string;
+      // Security: this is a localhost-only reverse proxy (targetUrl is always 127.0.0.1).
+      // Body forwarding to local app processes is intentional and safe. // lgtm[js/file-access-to-http]
+      let body: string | undefined;
+      if (method !== 'GET' && method !== 'HEAD') {
+        body = request.headers['content-type']?.includes('application/json')
+          ? JSON.stringify(request.body)
+          : request.body as string;
       }
 
+      const fetchOpts: RequestInit = { method, headers, body };
       const proxyRes = await fetch(targetUrl, fetchOpts);
 
       // Forward status and headers
@@ -2844,8 +2840,8 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
       if (ct) reply.header('Content-Type', ct);
       reply.header('Access-Control-Allow-Origin', '*');
 
-      const body = await proxyRes.text();
-      return reply.send(body);
+      const responseBody = await proxyRes.text();
+      return reply.send(responseBody);
     } catch (err) {
       reply.status(502).header('Content-Type', 'text/html; charset=utf-8').send(generateAppDownPage(portNum, appName));
     }
@@ -2864,7 +2860,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
     const { resolve } = await import('node:path');
     const { mkdirSync, existsSync, writeFileSync } = await import('node:fs');
 
-    const uploadDir = resolve(process.cwd(), '.forgeai', 'uploads');
+    const uploadDir = resolve(resolveForgeAIRoot(), 'uploads');
     if (!existsSync(uploadDir)) mkdirSync(uploadDir, { recursive: true });
 
     // Expect base64 JSON body: { filename, data (base64), mimeType }
@@ -3547,7 +3543,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
     // List existing sites from workspace
     const { resolve } = await import('node:path');
     const { existsSync, readdirSync, statSync } = await import('node:fs');
-    const workspaceDir = resolve(process.cwd(), '.forgeai', 'workspace');
+    const workspaceDir = resolveWorkspaceRoot();
     const sites: Array<{ name: string; type: 'site' | 'app'; url: string; port?: number }> = [];
 
     // Static sites from workspace directories
@@ -3620,10 +3616,28 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
     return { domain: null, subdomainsEnabled: false, baseUrl: resolvePublicUrl(vault).baseUrl };
   });
 
+  // ─── Simple per-IP rate limiter for sensitive endpoints ───
+  const endpointRateLimits = new Map<string, { count: number; resetAt: number }>();
+  const checkEndpointRateLimit = (ip: string, endpoint: string, maxPerMinute = 30): boolean => {
+    const key = `${ip}:${endpoint}`;
+    const now = Date.now();
+    const entry = endpointRateLimits.get(key);
+    if (!entry || now > entry.resetAt) {
+      endpointRateLimits.set(key, { count: 1, resetAt: now + 60_000 });
+      return true;
+    }
+    entry.count++;
+    return entry.count <= maxPerMinute;
+  };
+
   // ─── Caddy On-Demand TLS Check ─────────────────────
   // Caddy calls this endpoint before issuing a certificate for a subdomain.
   // Returns 200 if the subdomain is a valid site/app, 404 otherwise.
   app.get('/api/caddy/check', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!checkEndpointRateLimit(request.ip, 'caddy-check', 60)) {
+      reply.status(429).send('rate limited');
+      return;
+    }
     const { domain: queryDomain } = request.query as { domain?: string };
     if (!queryDomain) {
       reply.status(400).send('missing domain parameter');
@@ -3665,7 +3679,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
     // Check if subdomain is a workspace site directory
     const { resolve } = await import('node:path');
     const { existsSync, statSync } = await import('node:fs');
-    const workspaceDir = resolve(process.cwd(), '.forgeai', 'workspace');
+    const workspaceDir = resolveWorkspaceRoot();
     const siteDir = resolve(workspaceDir, subdomain);
     if (existsSync(siteDir) && statSync(siteDir).isDirectory()) {
       reply.status(200).send('ok');
@@ -3677,6 +3691,10 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
 
   // ─── Delete Static Site ─────────────────────────────
   app.delete('/api/sites/:name', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!checkEndpointRateLimit(request.ip, 'delete-site', 10)) {
+      reply.status(429).send({ error: 'Rate limited' });
+      return;
+    }
     const { name } = request.params as { name: string };
     if (!name || /[/\\]/.test(name)) {
       reply.status(400).send({ error: 'Invalid site name' }); return;
@@ -3684,7 +3702,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
 
     const { resolve, normalize, sep } = await import('node:path');
     const { existsSync, rmSync } = await import('node:fs');
-    const workspaceDir = resolve(process.cwd(), '.forgeai', 'workspace');
+    const workspaceDir = resolveWorkspaceRoot();
     const siteDir = resolve(workspaceDir, name);
 
     // Security: prevent directory traversal
@@ -3815,16 +3833,46 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
     return { deleted: true, name };
   });
 
-  // Restore app registry from Vault on startup
+  // Restore app registry from Vault on startup + auto-restart managed apps
   if (vault?.isInitialized()) {
     try {
       const saved = vault.get('config:app_registry');
       if (saved) {
-        const entries = JSON.parse(saved) as Array<[string, { port: number; name: string; createdAt: string; description?: string }]>;
+        const entries = JSON.parse(saved) as Array<[string, { port: number; name: string; createdAt: string; description?: string; cwd?: string; command?: string; args?: string[] }]>;
         for (const [name, info] of entries) {
           appRegistry.set(name, info);
         }
         logger.info('App registry restored', { count: appRegistry.size });
+
+        // Auto-restart managed apps that have cwd + command persisted
+        if (appManager) {
+          for (const [name, info] of entries) {
+            if (info.cwd && info.command) {
+              const { existsSync: cwdExists } = await import('node:fs');
+              if (!cwdExists(info.cwd)) {
+                logger.warn(`Auto-restart skipped "${name}": cwd not found`, { cwd: info.cwd });
+                continue;
+              }
+              try {
+                const startResult = await appManager.startApp({
+                  name,
+                  port: info.port,
+                  cwd: info.cwd,
+                  command: info.command,
+                  args: info.args,
+                  description: info.description,
+                });
+                if (startResult.success) {
+                  logger.info(`Auto-restarted app "${name}"`, { port: info.port, cwd: info.cwd });
+                } else {
+                  logger.warn(`Auto-restart failed "${name}": ${startResult.error}`);
+                }
+              } catch (err) {
+                logger.error(`Auto-restart error "${name}"`, err);
+              }
+            }
+          }
+        }
       }
     } catch { /* ignore parse errors */ }
   }
@@ -4829,7 +4877,7 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
   app.get('/api/channels/whatsapp/enabled', async () => {
     const enabled = vault?.isInitialized() && vault.has('channel:whatsapp:enabled');
     const hasSession = (await import('node:fs')).existsSync(
-      (await import('node:path')).resolve(process.cwd(), '.forgeai', 'whatsapp-session', 'creds.json')
+      (await import('node:path')).resolve(resolveForgeAIRoot(), 'whatsapp-session', 'creds.json')
     );
     return { enabled: enabled || hasSession, hasSession };
   });
@@ -5149,8 +5197,8 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
   logger.info('Pairing routes registered');
 
   // ─── Workspace Prompts API ────────────────────────────
-  const workspacePath = (await import('node:path')).resolve(process.cwd(), '.forgeai', 'workspace');
-  const forgeaiPath = (await import('node:path')).resolve(process.cwd(), '.forgeai');
+  const workspacePath = resolveWorkspaceRoot();
+  const forgeaiPath = resolveForgeAIRoot();
 
   // AUTOPILOT.md is a special file: lives in .forgeai/ root, not /workspace/
   // It's editable via the same Workspace UI but has different semantics

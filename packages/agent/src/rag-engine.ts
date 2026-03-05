@@ -1,10 +1,10 @@
 import { resolve } from 'node:path';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, unlinkSync } from 'node:fs';
-import { createLogger } from '@forgeai/shared';
+import { createLogger, resolveForgeAIRoot } from '@forgeai/shared';
 
 const logger = createLogger('Agent:RAG');
 
-const RAG_DATA_DIR = resolve(process.cwd(), '.forgeai', 'rag');
+const RAG_DATA_DIR = resolve(resolveForgeAIRoot(), 'rag');
 const RAG_CONFIG_FILE = resolve(RAG_DATA_DIR, '_config.json');
 
 export interface RAGDocument {

@@ -1,7 +1,7 @@
 import { resolve } from 'node:path';
 import { readFile, writeFile, readdir, mkdir, unlink } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { createLogger } from '@forgeai/shared';
+import { createLogger, resolveForgeAIRoot } from '@forgeai/shared';
 
 const logger = createLogger('Core:ChatHistoryStore');
 
@@ -57,7 +57,7 @@ export class ChatHistoryStore {
   private dir: string;
 
   constructor(baseDir?: string) {
-    this.dir = baseDir || resolve(process.cwd(), '.forgeai', 'chat-sessions');
+    this.dir = baseDir || resolve(resolveForgeAIRoot(), 'chat-sessions');
     this.ensureDir();
   }
 

@@ -1,6 +1,7 @@
 import { resolve, join } from 'node:path';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import { resolveForgeAIRoot } from '@forgeai/shared';
 import type { PluginStorage } from './types.js';
 
 export class FilePluginStorage implements PluginStorage {
@@ -9,7 +10,7 @@ export class FilePluginStorage implements PluginStorage {
   private loaded = false;
 
   constructor(pluginId: string, basePath?: string) {
-    const base = basePath || resolve(process.cwd(), '.forgeai', 'plugins');
+    const base = basePath || resolve(resolveForgeAIRoot(), 'plugins');
     this.filePath = join(base, `${pluginId}.json`);
   }
 

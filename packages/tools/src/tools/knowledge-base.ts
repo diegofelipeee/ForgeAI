@@ -1,7 +1,7 @@
 import { resolve, join } from 'node:path';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { createLogger, generateId } from '@forgeai/shared';
+import { createLogger, generateId, resolveForgeAIRoot } from '@forgeai/shared';
 import { BaseTool } from '../base.js';
 import type { ToolDefinition, ToolResult } from '../base.js';
 
@@ -76,7 +76,7 @@ export class KnowledgeBaseTool extends BaseTool {
 
   constructor(storePath?: string) {
     super();
-    this.storePath = storePath || resolve(process.cwd(), '.forgeai', 'knowledge');
+    this.storePath = storePath || resolve(resolveForgeAIRoot(), 'knowledge');
   }
 
   private async ensureLoaded(): Promise<void> {

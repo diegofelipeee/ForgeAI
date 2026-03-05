@@ -1,4 +1,4 @@
-import { createLogger } from '@forgeai/shared';
+import { createLogger, resolveForgeAIRoot } from '@forgeai/shared';
 import { randomBytes } from 'node:crypto';
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
@@ -37,7 +37,7 @@ export class PairingManager {
   private filePath: string;
 
   constructor(basePath?: string) {
-    const base = basePath ?? resolve(process.cwd(), '.forgeai');
+    const base = basePath ?? resolveForgeAIRoot();
     this.filePath = resolve(base, 'pairing-codes.json');
     this.load();
   }

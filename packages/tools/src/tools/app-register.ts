@@ -11,6 +11,9 @@ interface AppRegistryEntry {
   name: string;
   createdAt: string;
   description?: string;
+  cwd?: string;
+  command?: string;
+  args?: string[];
 }
 
 interface AppRegistryRef {
@@ -112,12 +115,15 @@ Do NOT use curl to call /api/apps/register — use this tool instead.`,
     const { result, duration } = await this.timed(async () => {
       const actions: string[] = [];
 
-      // 1. Register in appRegistry
+      // 1. Register in appRegistry (include process info for auto-restart on gateway restart)
       refs!.appRegistry.set(rawName, {
         port,
         name: rawName,
         createdAt: new Date().toISOString(),
         description,
+        ...(cwd ? { cwd } : {}),
+        ...(command ? { command } : {}),
+        ...(args.length > 0 ? { args } : {}),
       });
       actions.push(`Registered app "${rawName}" on port ${port}`);
 

@@ -11,6 +11,7 @@ import {
   DEFAULT_GATEWAY_HOST,
   DEFAULT_GATEWAY_PORT,
   UserRole,
+  resolveWorkspaceRoot,
   type HealthStatus,
 } from '@forgeai/shared';
 import { registerChatRoutes, getTelegramChannel, getAppRegistry } from './chat-routes.js';
@@ -1938,7 +1939,7 @@ document.getElementById('smtp-user').addEventListener('input', function() {
       }
 
       // Check 2: Is this a workspace site directory? → serve static files
-      const workspaceDir = resolve(process.cwd(), '.forgeai', 'workspace');
+      const workspaceDir = resolveWorkspaceRoot();
       const siteDir = resolve(workspaceDir, subdomain);
 
       if (!existsSync(siteDir) || !statSync(siteDir).isDirectory()) {

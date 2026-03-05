@@ -3,6 +3,7 @@ import { mkdirSync, existsSync, readdirSync, writeFileSync } from 'node:fs';
 import puppeteer, { type Browser, type Page } from 'puppeteer';
 import { BaseTool } from '../base.js';
 import type { ToolDefinition, ToolResult } from '../base.js';
+import { resolveForgeAIRoot } from '@forgeai/shared';
 import {
   generateStealthProfile,
   getStealthLaunchArgs,
@@ -28,9 +29,9 @@ import {
 // Only block dangerous non-HTTP protocols in isBlockedUrl().
 const BLOCKED_DOMAINS: string[] = [];
 
-const SCREENSHOT_DIR = resolve(process.cwd(), '.forgeai', 'screenshots');
-const PROFILES_DIR = resolve(process.cwd(), '.forgeai', 'browser-profiles');
-const SNAPSHOTS_DIR = resolve(process.cwd(), '.forgeai', 'snapshots');
+const SCREENSHOT_DIR = resolve(resolveForgeAIRoot(), 'screenshots');
+const PROFILES_DIR = resolve(resolveForgeAIRoot(), 'browser-profiles');
+const SNAPSHOTS_DIR = resolve(resolveForgeAIRoot(), 'snapshots');
 const MAX_NAV_TIMEOUT = 30_000;
 
 export class PuppeteerBrowserTool extends BaseTool {
