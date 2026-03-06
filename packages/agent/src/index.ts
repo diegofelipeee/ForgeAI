@@ -35,3 +35,7 @@ export { ForgeTeamEngine, createForgeTeamEngine, getActiveTeams, getActiveTeam }
 export type { TeamTask, TeamWorker, ActiveTeam, TeamResult } from './forge-team.js';
 export { WakeWordManager, createWakeWordManager } from './wake-word.js';
 export type { WakeWordEventHandler, WakeWordDetector } from './wake-word.js';
+export { classifyIntent, buildIntentContext, logIntent } from './intent-classifier.js';
+export type { IntentType, IntentResult, SuggestedAction } from './intent-classifier.js';
+export { AgentWorkflowEngine, createAgentWorkflowEngine, InMemoryWorkflowStore, MySQLWorkflowStore } from './workflow-engine.js';
+export type { WorkflowState, WorkflowStep as AgentWorkflowStep, WorkflowStatus as AgentWorkflowStatus, StepStatus as AgentStepStatus, ExtractedContext, WorkflowPersistence } from './workflow-engine.js';

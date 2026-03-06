@@ -9,7 +9,7 @@ import { createAdvancedRateLimiter, type AdvancedRateLimiter, createIPFilter, ty
 import { getCompanionBridge, CompanionToolExecutor } from './companion-bridge.js';
 import { createTailscaleHelper, type TailscaleHelper } from '../remote/tailscale-helper.js';
 import { createPluginManager, AutoResponderPlugin, ContentFilterPlugin, ChatCommandsPlugin, type PluginManager, createPluginSDK, type PluginSDK } from '@forgeai/plugins';
-import { createVoiceEngine, type VoiceEngine, createMCPClient, type MCPClient, createMemoryManager, type MemoryManager, createRAGEngine, type RAGEngine, extractTextFromFile, createAutoPlanner, type AutoPlanner, createWakeWordManager, type WakeWordManager, createPromptOptimizer, createForgeTeamEngine, getActiveTeams } from '@forgeai/agent';
+import { createVoiceEngine, type VoiceEngine, createMCPClient, type MCPClient, createMemoryManager, type MemoryManager, createRAGEngine, type RAGEngine, extractTextFromFile, createAutoPlanner, type AutoPlanner, createWakeWordManager, type WakeWordManager, createPromptOptimizer, createForgeTeamEngine, getActiveTeams, createAgentWorkflowEngine, MySQLWorkflowStore } from '@forgeai/agent';
 import { createOAuth2Manager, type OAuth2Manager, createAPIKeyManager, type APIKeyManager, createGDPRManager, type GDPRManager } from '@forgeai/security';
 import { createGitHubIntegration, type GitHubIntegration, createRSSFeedManager, type RSSFeedManager, createGmailIntegration, type GmailIntegration, createCalendarIntegration, type CalendarIntegration, createNotionIntegration, type NotionIntegration, createHomeAssistantIntegration, type HomeAssistantIntegration, setHomeAssistantRef, createSpotifyIntegration, type SpotifyIntegration, setSpotifyRef } from '@forgeai/tools';
 import { createWebhookManager, type WebhookManager } from '../webhooks/webhook-manager.js';
@@ -4130,6 +4130,24 @@ export async function registerChatRoutes(app: FastifyInstance, vault?: Vault, au
     if (defaultAgent) {
       defaultAgent.setPromptOptimizer(promptOptimizer);
       logger.info('Prompt optimizer attached to default agent');
+    }
+  }
+
+  // ─── Agent Workflow Engine (state machine for agentic workflows) ──
+  const agentWorkflowEngine = createAgentWorkflowEngine();
+  try {
+    const { getDatabase: getWfDb } = await import('../database/connection.js');
+    const wfDb = getWfDb();
+    agentWorkflowEngine.setPersistence(new MySQLWorkflowStore(() => wfDb as any));
+    logger.info('Agent workflow engine using MySQL persistence');
+  } catch {
+    logger.info('Agent workflow engine using in-memory persistence (DB not ready)');
+  }
+  if (agentManager) {
+    const defaultAgent = agentManager.getDefaultAgent();
+    if (defaultAgent) {
+      defaultAgent.setWorkflowEngine(agentWorkflowEngine);
+      logger.info('Agent workflow engine attached to default agent');
     }
   }
 

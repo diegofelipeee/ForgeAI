@@ -6,6 +6,8 @@ import { UsageTracker, createUsageTracker } from './usage-tracker.js';
 import { MemoryManager } from './memory-manager.js';
 import { PromptOptimizer } from './prompt-optimizer.js';
 import { loadWorkspacePrompts } from './workspace-prompts.js';
+import { classifyIntent, buildIntentContext, logIntent } from './intent-classifier.js';
+import { AgentWorkflowEngine } from './workflow-engine.js';
 
 export interface ToolExecutor {
   listForLLM(): Array<{ type: 'function'; function: { name: string; description: string; parameters: Record<string, unknown> } }>;
@@ -208,6 +210,7 @@ export class AgentRuntime {
   private contextProvider: (() => string | null) | null = null;
   private planContextProvider: ((sessionId: string) => string | null) | null = null;
   private promptOptimizer: PromptOptimizer | null = null;
+  private workflowEngine: AgentWorkflowEngine | null = null;
 
   constructor(config: AgentConfig, router?: LLMRouter, usageTracker?: UsageTracker) {
     this.config = config;
@@ -239,6 +242,15 @@ export class AgentRuntime {
   setPromptOptimizer(optimizer: PromptOptimizer): void {
     this.promptOptimizer = optimizer;
     logger.info('Prompt optimizer attached to agent runtime (auto-optimization enabled)');
+  }
+
+  setWorkflowEngine(engine: AgentWorkflowEngine): void {
+    this.workflowEngine = engine;
+    logger.info('Workflow engine attached to agent runtime (state machine enabled)');
+  }
+
+  getWorkflowEngine(): AgentWorkflowEngine | null {
+    return this.workflowEngine;
   }
 
   getPromptOptimizer(): PromptOptimizer | null {
@@ -774,8 +786,11 @@ If command fails, analyze before retry. If 2 approaches fail, ask user. Prefer n
       };
     }
 
-    // Step 2: Build conversation context
+    // Step 2: Intent classification (zero-cost heuristic — no LLM call)
     const history = this.getHistory(params.sessionId);
+    const intent = classifyIntent(params.content, history);
+    logIntent(params.sessionId, params.content, intent);
+
     history.push({
       role: 'user',
       content: guardResult.sanitizedInput ?? params.content,
@@ -812,6 +827,25 @@ If command fails, analyze before retry. If 2 approaches fail, ask user. Prefer n
         enrichedSystemPrompt += `\n\n--- Current System State ---\n${dynamicCtx}`;
       }
     }
+    // Inject intent classification context (helps LLM understand message type)
+    if (!isLocalLLM) {
+      const intentCtx = buildIntentContext(intent);
+      if (intentCtx) {
+        enrichedSystemPrompt += `\n\n${intentCtx}`;
+      }
+    }
+    // Inject active workflow state (state machine context)
+    if (this.workflowEngine && !isLocalLLM) {
+      try {
+        const activeWorkflow = await this.workflowEngine.getActiveWorkflow(params.sessionId);
+        if (activeWorkflow) {
+          const wfCtx = this.workflowEngine.buildWorkflowContext(activeWorkflow);
+          enrichedSystemPrompt += `\n\n${wfCtx}`;
+        }
+      } catch (e) {
+        logger.warn('Failed to load workflow state', e as Record<string, unknown>);
+      }
+    }
     // For local LLMs, limit history to last 4 messages to keep context small
     const historyToUse = isLocalLLM ? history.slice(-4) : history;
     const messages: LLMMessage[] = [
@@ -828,7 +862,9 @@ If command fails, analyze before retry. If 2 approaches fail, ask user. Prefer n
     }
 
     // Step 4: Build tools list for LLM
-    const tools: LLMToolDefinition[] | undefined = this.toolExecutor
+    // Skip tools for simple intents (greetings, status checks, thanks) — saves tokens
+    const skipToolsForIntent = intent.skipTools === true && !isLocalLLM;
+    const tools: LLMToolDefinition[] | undefined = (this.toolExecutor && !skipToolsForIntent)
       ? this.toolExecutor.listForLLM().map(t => ({
           name: t.function.name,
           description: t.function.description,
@@ -1082,12 +1118,18 @@ If everything is correct, present your final answer now. If you find issues, mak
             const isRepaired = !!(args as Record<string, unknown>)['_repaired'];
 
             // Track step: tool_call
-            steps.push({
+            const toolCallStep: AgentStep = {
               type: 'tool_call',
               tool: toolCall.name,
               args,
               message: `Calling ${toolCall.name}(${Object.keys(args).join(', ')})${isTruncated ? ' [TRUNCATED]' : ''}`,
               timestamp: new Date().toISOString(),
+            };
+            steps.push(toolCallStep);
+
+            this.emitProgress(params.sessionId, {
+              type: 'step', sessionId: params.sessionId, agentId: this.config.id,
+              step: toolCallStep, timestamp: Date.now(),
             });
 
             if (isTruncated) {

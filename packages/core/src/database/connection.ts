@@ -15,9 +15,7 @@ function buildKnexConfig(): Knex.Config {
       password: process.env['MYSQL_PASSWORD'] || '',
       database: process.env['MYSQL_DATABASE'] || 'forgeai',
       charset: 'utf8mb4',
-      // mysql2-specific: allow RSA key retrieval for caching_sha2_password over TCP without SSL
-      allowPublicKeyRetrieval: true,
-    } as Record<string, unknown>,
+    },
     pool: {
       min: 2,
       max: 10,
@@ -118,6 +116,14 @@ export async function runMigrations(): Promise<void> {
       await applyMigration006(database);
       await database('forgeai_migrations').insert({ version: 6, name: '006_memory_system' });
       logger.info('Migration 006_memory_system applied');
+    }
+
+    // Migration 7: Workflow States (state machine for agentic workflows)
+    if (currentVersion < 7) {
+      logger.info('Applying migration 007_workflow_states...');
+      await applyMigration007(database);
+      await database('forgeai_migrations').insert({ version: 7, name: '007_workflow_states' });
+      logger.info('Migration 007_workflow_states applied');
     }
 
     logger.info('All migrations applied successfully');
@@ -365,6 +371,33 @@ async function applyMigration006(db: Knex): Promise<void> {
     });
     await db.raw('CREATE INDEX `memory_entities_name_index` ON `memory_entities` (`name`(191))');
     logger.info('Created memory_entities table');
+  }
+}
+
+async function applyMigration007(db: Knex): Promise<void> {
+  const hasTable = await db.schema.hasTable('workflow_states');
+  if (!hasTable) {
+    await db.schema.createTable('workflow_states', (table) => {
+      table.string('id', 64).primary();
+      table.string('session_id', 64).notNullable();
+      table.string('agent_id', 64).notNullable();
+      table.text('user_message').notNullable();
+      table.string('status', 32).notNullable().defaultTo('pending');
+      table.integer('current_step_index').notNullable().defaultTo(0);
+      table.json('steps_json').notNullable();
+      table.json('context_json').nullable();
+      table.json('metadata_json').nullable();
+      table.integer('total_tokens').notNullable().defaultTo(0);
+      table.integer('error_count').notNullable().defaultTo(0);
+      table.timestamp('completed_at').nullable();
+      table.timestamp('created_at').defaultTo(db.fn.now());
+      table.timestamp('updated_at').defaultTo(db.fn.now());
+      table.index('session_id');
+      table.index('agent_id');
+      table.index('status');
+      table.index('created_at');
+    });
+    logger.info('Created workflow_states table');
   }
 }
 
