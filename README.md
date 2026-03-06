@@ -65,7 +65,7 @@ Your Messages ──→ 9 Security Layers ──→ Agent (any LLM) ──→ 19
 One AI, every platform. WhatsApp, Telegram, Discord, Slack, Microsoft Teams, Google Chat, WebChat, and IoT devices via Node Protocol. Each channel gets real-time progress updates, typing indicators, and automatic message chunking.
 
 ### 🤖 Autonomous Agent
-The agentic loop runs with **no iteration limit** — the agent works until the task is complete (only stuck-loop detection serves as safety). It browses the web (with stealth anti-detection), executes code, manages files, takes screenshots, schedules tasks, controls smart home devices, **creates Forge Teams of specialist agents**, and communicates with other agents — all without human intervention. **Self-management**: the agent autonomously diagnoses, fixes, and **installs missing dependencies** (languages, libraries, tools) with full root access. **Adaptive Prompt Optimizer**: learns from past task outcomes to improve future performance.
+The agentic loop runs with **no iteration limit** — the agent works until the task is complete (only stuck-loop detection serves as safety). It browses the web (with stealth anti-detection), executes code, manages files, takes screenshots, schedules tasks, controls smart home devices, **creates Forge Teams of specialist agents**, and communicates with other agents — all without human intervention. **Self-management**: the agent autonomously diagnoses, fixes, and **installs missing dependencies** (languages, libraries, tools) with full root access. **Adaptive Prompt Optimizer**: learns from past task outcomes to improve future performance. **Intent Classifier**: zero-cost heuristic classification (greeting/simple/complex/ambiguous/followup) — skips tools for simple messages, saves tokens, asks for clarification on ambiguous inputs.
 
 </td>
 <td width="50%">
@@ -532,6 +532,35 @@ Define multi-step workflows with conditions, delays, transforms, and parallel br
 </details>
 
 <details>
+<summary><b>Intent Classifier (Zero-Cost Heuristic)</b></summary>
+
+Every incoming message is classified **before** hitting the LLM — with zero token cost. The classifier uses regex patterns and heuristics to categorize messages into 5 types:
+
+- **`greeting`** — "oi", "hello", "bom dia" → direct response, no tools sent to LLM
+- **`simple`** — "yes", "thanks", "what time is it?" → direct response, no tools
+- **`complex`** — "create a React app with authentication" → full tool access
+- **`ambiguous`** — "online", "status", "deploy" → LLM guided to ask for clarification
+- **`followup`** — "now add MySQL", "continue" → treated as continuation of previous context
+
+For simple/greeting intents, the **entire tool definition list is skipped** when sending to the LLM — saving hundreds of tokens per request. Disambiguation maps provide clarifying questions for ambiguous single-word inputs. Works across all channels (Telegram, WhatsApp, Dashboard, etc.).
+
+</details>
+
+<details>
+<summary><b>Agent Workflow Engine (State Machine)</b></summary>
+
+DB-persisted state machine for tracking agent progress through complex multi-step tasks. Different from the Workflow Engine (`@forgeai/workflows`) which runs predefined pipelines — the Agent Workflow Engine tracks **dynamic, conversation-driven** workflows.
+
+- **States**: `pending` → `extracting_context` → `planning` → `executing` → `verifying` → `completed`
+- **Steps** with objectives, allowed tools, retry logic, and token cost tracking
+- **Context extraction** — task type, entities, constraints, language, complexity
+- **MySQL persistence** (`workflow_states` table, migration 007) — survives restarts
+- **In-memory fallback** if DB is unavailable
+- Active workflow context injected into LLM system prompt on every message
+
+</details>
+
+<details>
 <summary><b>MCP Client (Model Context Protocol)</b></summary>
 
 Connect to external MCP servers via HTTP, SSE, or stdio transport. Discover and call remote tools. Manage servers from the Dashboard Tools page.
@@ -774,6 +803,8 @@ API endpoints:
               │ Circuit breaker│  │ Sandbox (Docker) │
               │ Failover chain │  └────────┬────────┘
               │ Agentic loop   │           │
+              │ Intent Classifier│           │
+              │ Workflow Engine │           │
               │ Prompt Optimizer│ ┌────────▼────────┐
               └────────────────┘  │  INTEGRATIONS    │
                                   │  GitHub · Gmail  │
@@ -783,7 +814,7 @@ API endpoints:
                                           │
                     ┌─────────────────────▼──────────────────────┐
                     │              PERSISTENCE                     │
-                    │  MySQL 8 (Knex.js) · 12 tables               │
+                    │  MySQL 8 (Knex.js) · 13 tables               │
                     │  Credential Vault (AES-256-GCM, file-based)  │
                     │  Chat History (JSON, session-based)           │
                     │  Memory Store (MySQL + OpenAI embeddings)     │
@@ -798,7 +829,7 @@ API endpoints:
 packages/
 ├── shared/      →  Types, utils, constants, logger
 ├── security/    →  Vault, RBAC, Rate Limiter, Audit, Prompt Guard, JWT, 2FA, Email OTP, Sanitizer, IP Filter
-├── agent/       →  AgentRuntime, AgentManager, LLM Router (10 providers), ForgeTeamEngine, PromptOptimizer, Agentic Loop
+├── agent/       →  AgentRuntime, AgentManager, LLM Router (10 providers), ForgeTeamEngine, PromptOptimizer, IntentClassifier, AgentWorkflowEngine, Agentic Loop
 ├── channels/    →  WhatsApp, Telegram, Discord, Slack, Teams, Google Chat, WebChat, Node Protocol
 ├── tools/       →  Tool Registry, 19 tools (incl. forge_team, agent_delegate, plan tools), GitHub/Gmail/Calendar/Notion/RSS integrations
 ├── plugins/     →  Plugin Manager, Plugin SDK, AutoResponder, ContentFilter, ChatCommands
@@ -973,7 +1004,7 @@ pnpm forge status      # Quick status check
 
 ## 🗺 Roadmap
 
-### Completed — 33 Phases
+### Completed — 35 Phases
 
 All core features are implemented and tested:
 
@@ -984,7 +1015,7 @@ All core features are implemented and tested:
 - **Dashboard** — 19 pages, WebSocket real-time, provider balance tracking
 - **Multimodal** — Vision input (image analysis), Voice STT/TTS, Image generation (DALL-E 3, Leonardo AI, Stable Diffusion)
 - **Integrations** — GitHub, Gmail, Google Calendar, Notion, RSS
-- **Advanced** — RAG, AutoPlanner, Workflows, **Persistent Memory (MySQL + OpenAI embeddings)**, Autopilot, DM Pairing, Multi-Agent, **Forge Teams**, **Prompt Optimizer**
+- **Advanced** — RAG, AutoPlanner, Workflows, **Persistent Memory (MySQL + OpenAI embeddings)**, Autopilot, DM Pairing, Multi-Agent, **Forge Teams**, **Prompt Optimizer**, **Intent Classifier**, **Agent Workflow Engine (State Machine)**
 - **Infrastructure** — Docker (Python 3 + Node.js 22 + Chromium), CI/CD, E2E tests, OpenTelemetry, GDPR, OAuth2, IP filtering
 - **Node Protocol** — Lightweight Go binary (~5MB) for embedded devices (Raspberry Pi, Jetson, BeagleBone, NanoKVM). WebSocket connection to Gateway, auth, heartbeat, remote command execution, system info reporting, node-to-node relay. Key management via Dashboard (encrypted Vault, hot-reload). Cross-compilation for Linux ARM/AMD64, Windows, macOS
 - **Security Hardening** — Startup integrity check, generic webhook alerts, audit log rotation, RBAC hard enforcement (403 block for non-admin authenticated users)
@@ -1009,6 +1040,7 @@ All core features are implemented and tested:
 - **Adaptive Prompt Optimizer** — Native DSPy-inspired auto-optimization. Classifies tasks into 9 categories, records success/failure patterns with scores, injects proven strategies + anti-patterns into prompts for similar future tasks. Persists to JSON, auto-saves every 60s, temporal decay for old patterns
 - **Full Installation Freedom** — Docker image includes Python 3, pip, venv, curl, git alongside Node.js 22 and Chromium. Agent has explicit instructions to install ANY missing dependency (languages, libraries, tools) with full root access. Never substitutes technologies — if user asks for Flask, agent installs Flask
 - **Persistent Memory System** — MySQL-backed cross-session memory with real OpenAI embeddings (`text-embedding-3-small`) and TF-IDF fallback. `memory_entries` + `memory_entities` tables (migration 006, auto-applied). Entity extraction (technologies, projects, URLs, file paths). Hybrid architecture: in-memory cache for fast semantic search + MySQL for durable persistence. Graceful degradation: no OpenAI key → TF-IDF, no MySQL → in-memory only. Zero breaking changes to existing MemoryManager API
+- **Intent Classifier + Agent Workflow Engine** — Zero-cost heuristic intent classification (greeting/simple/complex/ambiguous/followup) integrated into `processMessage`. Skips tool definitions for simple intents (saves tokens). Disambiguation maps for ambiguous inputs ("online", "status", "deploy"). Agent Workflow Engine: DB-persisted state machine (`workflow_states` table, migration 007) for tracking multi-step task progress. States: pending → extracting_context → planning → executing → verifying → completed. Context injection into system prompt. MySQL persistence with in-memory fallback
 
 ### What's Next
 
@@ -1033,6 +1065,8 @@ All core features are implemented and tested:
 | ~~Execution Planning tools~~ | ✅ Done |
 | ~~Python + multi-language support in Docker~~ | ✅ Done |
 | ~~Persistent Memory (MySQL + OpenAI embeddings + entities)~~ | ✅ Done |
+| ~~Intent Classifier (zero-cost heuristic, skipTools optimization)~~ | ✅ Done |
+| ~~Agent Workflow Engine (DB-persisted state machine)~~ | ✅ Done |
 | React Native mobile app (iOS + Android) | Medium |
 | ForgeAI Companion for macOS / Linux | Medium |
 | Signal messenger channel | Low |
@@ -1064,7 +1098,7 @@ pnpm test    # 38 E2E tests
 | **Language** | TypeScript (strict mode) |
 | **Runtime** | Node.js ≥ 22 |
 | **Gateway** | Fastify 5 + WebSocket |
-| **Database** | MySQL 8 via Knex.js (12 tables) |
+| **Database** | MySQL 8 via Knex.js (13 tables) |
 | **Encryption** | AES-256-GCM, PBKDF2 (310k iter), bcrypt, HMAC-SHA256 |
 | **Auth** | JWT (access + refresh + rotation) + TOTP 2FA + Email OTP (external) |
 | **Dashboard** | React 19, Vite 6, TailwindCSS 4, Lucide Icons |

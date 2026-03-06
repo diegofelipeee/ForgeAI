@@ -1,11 +1,11 @@
 # 🔥 ForgeAI — Development Roadmap
 
 > Full development history and future plans.
-> Last updated: 2026-03-05
+> Last updated: 2026-03-06
 
 ---
 
-## Status Atual — 23 Fases Completas
+## Status Atual — 35 Fases Completas
 
 ### Fase 1 ✅ — Core + Security + CLI + MySQL
 - `@forgeai/shared` — Types, utils, constants
@@ -123,6 +123,7 @@ Integrações:     1 restante (Spotify/HA)
 Segurança:       0 restantes ✅ COMPLETO (DB encryption → nice-to-have)
 ────────────────────────────────────────
 Total:          11 features restantes (de 37 originais — 70% concluído!)
+Intent/Workflow: 0 restantes ✅ COMPLETO (Intent Classifier + Agent Workflow Engine)
 ```
 
 ### Priorização Sugerida — Próximas Fases
@@ -233,6 +234,40 @@ A ideia é criar um **micro-agente leve** (binary Go/Rust ~5-10MB) que se comuni
 ---
 
 ## Roadmap — Fases Completas
+
+### Fase 35 ✅ — Intent Classifier + Agent Workflow Engine (State Machine)
+- **Intent Classifier** — Classificação heurística zero-custo (sem chamada LLM):
+  - `IntentClassifier` em `packages/agent/src/intent-classifier.ts`
+  - Classifica mensagens em 5 tipos: `simple`, `complex`, `ambiguous`, `followup`, `greeting`
+  - Detecção regex para saudações (oi, hello, bom dia), status checks, yes/no, agradecimentos, follow-ups
+  - Mapa de desambiguação para termos vagos (ex: "online", "status", "deploy", "mysql", "telegram")
+  - Flag `skipTools` para intents simples/greeting → **não envia lista de ferramentas ao LLM** → economia de centenas de tokens
+  - `buildIntentContext()` injeta contexto de classificação no system prompt
+  - Funciona em todos os channels (Telegram, Dashboard, WhatsApp, etc.)
+- **Agent Workflow Engine** — Máquina de estados para workflows agênticos:
+  - `AgentWorkflowEngine` em `packages/agent/src/workflow-engine.ts`
+  - Renomeado de `WorkflowEngine` para evitar conflito com `@forgeai/workflows` existente
+  - Estados: `pending` → `extracting_context` → `planning` → `executing` → `verifying` → `completed`
+  - Steps com: título, objetivo, ferramentas permitidas, retry logic, tracking de tokens
+  - `ExtractedContext` — extração de tipo de tarefa, entidades, constraints, idioma, complexidade
+  - Persistência: `InMemoryWorkflowStore` (fallback) + `MySQLWorkflowStore` (produção)
+  - `buildWorkflowContext()` injeta estado do workflow ativo no system prompt
+  - Factory: `createAgentWorkflowEngine()`
+- **DB Migration 007** — Tabela `workflow_states`:
+  - Colunas: id, session_id, agent_id, user_message, status, current_step_index, steps_json, context_json, metadata_json, total_tokens, error_count, timestamps
+  - Índices: session_id, agent_id, status, created_at
+  - Auto-applied no startup via migration runner
+- **Runtime Integration** (`packages/agent/src/runtime.ts`):
+  - `classifyIntent()` chamado após prompt guard (zero custo, sem LLM call)
+  - Contexto de intent injetado no system prompt
+  - Estado de workflow ativo injetado no system prompt
+  - Otimização `skipTools`: intents simples/greeting pula definições de ferramentas
+- **Gateway Wiring** (`packages/core/src/gateway/chat-routes.ts`):
+  - `AgentWorkflowEngine` criado e conectado ao agente default com persistência MySQL
+  - Fallback para in-memory se DB não disponível
+- **Fix: MySQL2 `allowPublicKeyRetrieval` warning** — Removida opção JDBC-only inválida do `connection.ts`
+- Exports: `classifyIntent`, `buildIntentContext`, `logIntent`, `AgentWorkflowEngine`, `createAgentWorkflowEngine`, `MySQLWorkflowStore`, `InMemoryWorkflowStore`
+- **13 tabelas MySQL**, **150+ API endpoints**
 
 ### Fase 34 ✅ — Persistent Memory System (MySQL + OpenAI Embeddings)
 - **MySQL-Backed Memory Persistence** — Memória do agente agora persiste no MySQL:
@@ -461,7 +496,7 @@ forgeai/
 │   ├── shared/          # Types, utils, constants
 │   ├── security/        # Vault, RBAC, Rate Limiter, Audit, Prompt Guard, JWT, 2FA, Sanitizer
 │   ├── core/            # Gateway (Fastify+WS), Session Manager, DB, Telemetry, Autopilot, Pairing
-│   ├── agent/           # AgentRuntime, AgentManager, LLMRouter (8 providers, failover, circuit breaker)
+│   ├── agent/           # AgentRuntime, AgentManager, LLMRouter (8 providers, failover, circuit breaker), IntentClassifier, AgentWorkflowEngine
 │   ├── channels/        # 7 channels: WhatsApp, Telegram, Discord, Slack, Teams, Google Chat, WebChat
 │   ├── tools/           # Tool Registry + 11 tools + Integrations (GitHub, Gmail, Calendar, Notion, RSS)
 │   ├── plugins/         # Plugin Manager + PluginSDK + 3 built-in plugins
@@ -497,4 +532,4 @@ forgeai/
 
 ---
 
-**Stats: 8 channels, 19 tools, 10 LLM providers, 19 dashboard pages, 150+ API endpoints, 9 security modules, 5 integrations, 53+ E2E tests, 12 MySQL tables.**
+**Stats: 8 channels, 19 tools, 10 LLM providers, 19 dashboard pages, 150+ API endpoints, 9 security modules, 5 integrations, 53+ E2E tests, 13 MySQL tables.**
