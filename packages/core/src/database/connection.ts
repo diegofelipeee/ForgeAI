@@ -15,9 +15,7 @@ function buildKnexConfig(): Knex.Config {
       password: process.env['MYSQL_PASSWORD'] || '',
       database: process.env['MYSQL_DATABASE'] || 'forgeai',
       charset: 'utf8mb4',
-      // mysql2-specific: allow RSA key retrieval for caching_sha2_password over TCP without SSL
-      allowPublicKeyRetrieval: true,
-    } as Record<string, unknown>,
+    },
     pool: {
       min: 2,
       max: 10,
@@ -110,6 +108,22 @@ export async function runMigrations(): Promise<void> {
       await applyMigration005(database);
       await database('forgeai_migrations').insert({ version: 5, name: '005_element_fingerprints' });
       logger.info('Migration 005_element_fingerprints applied');
+    }
+
+    // Migration 6: Memory System (persistent memory + entities)
+    if (currentVersion < 6) {
+      logger.info('Applying migration 006_memory_system...');
+      await applyMigration006(database);
+      await database('forgeai_migrations').insert({ version: 6, name: '006_memory_system' });
+      logger.info('Migration 006_memory_system applied');
+    }
+
+    // Migration 7: Workflow States (state machine for agentic workflows)
+    if (currentVersion < 7) {
+      logger.info('Applying migration 007_workflow_states...');
+      await applyMigration007(database);
+      await database('forgeai_migrations').insert({ version: 7, name: '007_workflow_states' });
+      logger.info('Migration 007_workflow_states applied');
     }
 
     logger.info('All migrations applied successfully');
@@ -314,6 +328,76 @@ async function applyMigration005(db: Knex): Promise<void> {
     // Prefix index for URL (191 chars max for utf8mb4 within 3072-byte key limit)
     await db.raw('CREATE INDEX `element_fingerprints_url_index` ON `element_fingerprints` (`url`(191))');
     logger.info('Created element_fingerprints table');
+  }
+}
+
+async function applyMigration006(db: Knex): Promise<void> {
+  const hasMemoryEntries = await db.schema.hasTable('memory_entries');
+  if (!hasMemoryEntries) {
+    await db.schema.createTable('memory_entries', (table) => {
+      table.string('id', 64).primary();
+      table.text('content').notNullable();
+      table.json('embedding_json').nullable();
+      table.json('metadata').nullable();
+      table.string('session_id', 64).nullable();
+      table.string('agent_id', 64).nullable();
+      table.string('memory_type', 32).notNullable().defaultTo('general');
+      table.decimal('importance', 3, 2).notNullable().defaultTo(0.5);
+      table.string('embedding_provider', 16).notNullable().defaultTo('tfidf');
+      table.integer('access_count').notNullable().defaultTo(0);
+      table.timestamp('last_accessed_at').nullable();
+      table.timestamp('created_at').defaultTo(db.fn.now());
+      table.timestamp('updated_at').defaultTo(db.fn.now());
+      table.index('session_id');
+      table.index('agent_id');
+      table.index('memory_type');
+      table.index('importance');
+      table.index('created_at');
+      table.index('last_accessed_at');
+    });
+    logger.info('Created memory_entries table');
+  }
+
+  const hasMemoryEntities = await db.schema.hasTable('memory_entities');
+  if (!hasMemoryEntities) {
+    await db.schema.createTable('memory_entities', (table) => {
+      table.string('id', 64).primary();
+      table.string('name', 255).notNullable();
+      table.string('entity_type', 32).notNullable();
+      table.string('memory_id', 64).notNullable().references('id').inTable('memory_entries').onDelete('CASCADE');
+      table.json('attributes').nullable();
+      table.timestamp('created_at').defaultTo(db.fn.now());
+      table.index('entity_type');
+    });
+    await db.raw('CREATE INDEX `memory_entities_name_index` ON `memory_entities` (`name`(191))');
+    logger.info('Created memory_entities table');
+  }
+}
+
+async function applyMigration007(db: Knex): Promise<void> {
+  const hasTable = await db.schema.hasTable('workflow_states');
+  if (!hasTable) {
+    await db.schema.createTable('workflow_states', (table) => {
+      table.string('id', 64).primary();
+      table.string('session_id', 64).notNullable();
+      table.string('agent_id', 64).notNullable();
+      table.text('user_message').notNullable();
+      table.string('status', 32).notNullable().defaultTo('pending');
+      table.integer('current_step_index').notNullable().defaultTo(0);
+      table.json('steps_json').notNullable();
+      table.json('context_json').nullable();
+      table.json('metadata_json').nullable();
+      table.integer('total_tokens').notNullable().defaultTo(0);
+      table.integer('error_count').notNullable().defaultTo(0);
+      table.timestamp('completed_at').nullable();
+      table.timestamp('created_at').defaultTo(db.fn.now());
+      table.timestamp('updated_at').defaultTo(db.fn.now());
+      table.index('session_id');
+      table.index('agent_id');
+      table.index('status');
+      table.index('created_at');
+    });
+    logger.info('Created workflow_states table');
   }
 }
 

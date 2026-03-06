@@ -24,7 +24,7 @@ export type { TTSAdapter, STTAdapter } from './voice-engine.js';
 export { MCPClient, createMCPClient } from './mcp-client.js';
 export type { MCPServerConfig, MCPTool, MCPResource, MCPPrompt, MCPCallResult } from './mcp-client.js';
 export { MemoryManager, createMemoryManager } from './memory-manager.js';
-export type { MemoryEntry, MemorySearchResult, MemoryConfig } from './memory-manager.js';
+export type { MemoryEntry, MemorySearchResult, MemoryConfig, MemoryEntity, MemoryPersistence, EmbeddingProviderType } from './memory-manager.js';
 export { RAGEngine, createRAGEngine, extractTextFromFile } from './rag-engine.js';
 export type { RAGDocument, RAGChunk, RAGSearchResult, RAGConfig, EmbeddingProvider } from './rag-engine.js';
 export { AutoPlanner, createAutoPlanner } from './auto-planner.js';
@@ -35,3 +35,7 @@ export { ForgeTeamEngine, createForgeTeamEngine, getActiveTeams, getActiveTeam }
 export type { TeamTask, TeamWorker, ActiveTeam, TeamResult } from './forge-team.js';
 export { WakeWordManager, createWakeWordManager } from './wake-word.js';
 export type { WakeWordEventHandler, WakeWordDetector } from './wake-word.js';
+export { classifyIntent, buildIntentContext, logIntent } from './intent-classifier.js';
+export type { IntentType, IntentResult, SuggestedAction } from './intent-classifier.js';
+export { AgentWorkflowEngine, createAgentWorkflowEngine, InMemoryWorkflowStore, MySQLWorkflowStore } from './workflow-engine.js';
+export type { WorkflowState, WorkflowStep as AgentWorkflowStep, WorkflowStatus as AgentWorkflowStatus, StepStatus as AgentStepStatus, ExtractedContext, WorkflowPersistence } from './workflow-engine.js';
