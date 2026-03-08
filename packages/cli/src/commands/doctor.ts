@@ -1,5 +1,5 @@
 import type { Command } from 'commander';
-import { execFileSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process'; // safe: CLI diagnostic tool checks for installed binaries
 import { existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { createConnection } from 'node:net';

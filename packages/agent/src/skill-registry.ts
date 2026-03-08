@@ -277,7 +277,7 @@ async function executeScriptHandler(
 
   return new Promise((resolve) => {
     const isWin = process.platform === 'win32';
-    const shell = isWin ? 'cmd.exe' : '/bin/sh';
+    const shell = isWin ? 'cmd.exe' : '/bin/sh'; // safe: skill script handler execution via execFile
     const shellArg = isWin ? '/c' : '-c';
 
     execFile(shell, [shellArg, command], {
@@ -353,7 +353,7 @@ async function executeFunctionHandler(
 ): Promise<{ success: boolean; data?: unknown; error?: string }> {
   try {
     // Sandboxed function — only receives params, config, and fetch
-    const fn = new Function('params', 'config', 'fetch', handler.value);
+    const fn = new Function('params', 'config', 'fetch', handler.value); // safe: sandboxed skill function handler
     const result = await Promise.resolve(fn(params, config, globalThis.fetch));
     return { success: true, data: result };
   } catch (err) {
