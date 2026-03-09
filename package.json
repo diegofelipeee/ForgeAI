@@ -13,6 +13,7 @@
     "dev": "pnpm -r run dev",
     "test": "pnpm -r run test",
     "lint": "pnpm -r run lint",
+    "start": "node packages/cli/dist/index.js start",
     "forge": "node packages/cli/dist/index.js",
     "db:migrate": "knex --knexfile packages/core/knexfile.ts migrate:latest",
     "db:rollback": "knex --knexfile packages/core/knexfile.ts migrate:rollback",
