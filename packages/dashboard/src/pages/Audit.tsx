@@ -1,20 +1,22 @@
 import { Shield, AlertTriangle, Info } from 'lucide-react';
+import { useI18n } from '@/lib/i18n';
 
 export function AuditPage() {
+  const { t } = useI18n();
   return (
     <div className="p-8 space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-white">Audit Log</h1>
-        <p className="text-sm text-zinc-400 mt-1">Security events and activity trail</p>
+        <h1 className="text-2xl font-bold text-white">{t('audit.title')}</h1>
+        <p className="text-sm text-zinc-400 mt-1">{t('audit.subtitle')}</p>
       </div>
 
       <div className="rounded-xl border border-zinc-800 overflow-hidden">
         <div className="bg-zinc-800/30 px-5 py-3 flex items-center gap-4 text-xs text-zinc-400 border-b border-zinc-800">
-          <span className="w-40">Timestamp</span>
-          <span className="w-36">Action</span>
-          <span className="w-20">Risk</span>
-          <span className="flex-1">Details</span>
-          <span className="w-16 text-right">Status</span>
+          <span className="w-40">{t('common.time')}</span>
+          <span className="w-36">{t('common.actions')}</span>
+          <span className="w-20">{t('activity.risk')}</span>
+          <span className="flex-1">{t('common.status')}</span>
+          <span className="w-16 text-right">{t('common.status')}</span>
         </div>
 
         {/* Placeholder events */}

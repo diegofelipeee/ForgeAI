@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { Mic, Volume2, Play, Square, Loader2, Settings2, RefreshCw, Check, AudioLines } from 'lucide-react';
+import { useI18n } from '@/lib/i18n';
 
 interface VoiceConfig {
   ttsProvider: string;
@@ -22,6 +23,7 @@ interface VoiceInfo {
 }
 
 export function VoicePage() {
+  const { t } = useI18n();
   const [config, setConfig] = useState<VoiceConfig | null>(null);
   const [providers, setProviders] = useState<{ tts: ProviderStatus[]; stt: ProviderStatus[] }>({ tts: [], stt: [] });
   const [voices, setVoices] = useState<VoiceInfo[]>([]);
@@ -159,8 +161,8 @@ export function VoicePage() {
             <AudioLines className="w-5 h-5 text-forge-400" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-white">Voice</h1>
-            <p className="text-sm text-zinc-500">Speech-to-Text (STT) & Text-to-Speech (TTS)</p>
+            <h1 className="text-2xl font-bold text-white">{t('voice.title')}</h1>
+            <p className="text-sm text-zinc-500">{t('voice.sttTts')}</p>
           </div>
         </div>
         <div className="flex items-center gap-3">

@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Mail, Inbox, Send, Search, RefreshCw, Loader2, Eye, MailOpen, Paperclip, Tag, AlertCircle, CheckCircle, Key } from 'lucide-react';
 import { api, type GmailMessage } from '@/lib/api';
+import { useI18n } from '@/lib/i18n';
 
 type GmailTab = 'inbox' | 'compose' | 'config';
 
 export function GmailPage() {
+  const { t } = useI18n();
   const [configured, setConfigured] = useState(false);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<GmailTab>('inbox');
@@ -117,29 +119,29 @@ export function GmailPage() {
         <div>
           <h1 className="text-2xl font-bold text-white flex items-center gap-2">
             <Mail className="w-6 h-6 text-red-400" />
-            Gmail
+            {t('gmail.title')}
           </h1>
           <p className="text-sm text-zinc-400 mt-1">
-            {configured ? `${unreadCount} não lidos` : 'Configure o acesso ao Gmail para começar'}
+            {configured ? `${unreadCount} ${t('gmail.unread')}` : t('gmail.notConfigured')}
           </p>
         </div>
 
         {configured && (
           <div className="flex items-center gap-2">
-            {(['inbox', 'compose', 'config'] as GmailTab[]).map(t => (
+            {(['inbox', 'compose', 'config'] as GmailTab[]).map(gt => (
               <button
-                key={t}
-                onClick={() => { setTab(t); setSelectedMsg(null); }}
+                key={gt}
+                onClick={() => { setTab(gt); setSelectedMsg(null); }}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                  tab === t
+                  tab === gt
                     ? 'bg-forge-500/20 text-forge-400 border border-forge-500/30'
                     : 'bg-zinc-800/50 text-zinc-400 hover:text-zinc-200 border border-transparent'
                 }`}
               >
-                {t === 'inbox' && <Inbox className="w-3.5 h-3.5" />}
-                {t === 'compose' && <Send className="w-3.5 h-3.5" />}
-                {t === 'config' && <Key className="w-3.5 h-3.5" />}
-                {t === 'inbox' ? 'Inbox' : t === 'compose' ? 'Escrever' : 'Config'}
+                {gt === 'inbox' && <Inbox className="w-3.5 h-3.5" />}
+                {gt === 'compose' && <Send className="w-3.5 h-3.5" />}
+                {gt === 'config' && <Key className="w-3.5 h-3.5" />}
+                {gt === 'inbox' ? t('gmail.inbox') : gt === 'compose' ? t('gmail.compose') : t('gmail.config')}
               </button>
             ))}
           </div>
@@ -151,15 +153,14 @@ export function GmailPage() {
         <div className="bg-zinc-950/50 border border-zinc-800 rounded-xl p-6 space-y-4">
           <h2 className="text-lg font-semibold text-white flex items-center gap-2">
             <Key className="w-5 h-5 text-amber-400" />
-            Configurar Gmail
+            {t('gmail.saveConfig')}
           </h2>
           <p className="text-sm text-zinc-400">
-            Para usar o Gmail, você precisa de um OAuth2 Access Token do Google.
-            Configure o Google como provider OAuth2 na página Settings e use o token gerado aqui.
+            {t('gmail.configDescription')}
           </p>
           <div className="space-y-3">
             <div>
-              <label className="text-xs text-zinc-500 mb-1 block">Access Token</label>
+              <label className="text-xs text-zinc-500 mb-1 block">{t('gmail.accessToken')}</label>
               <input
                 type="password"
                 value={accessToken}
@@ -174,17 +175,17 @@ export function GmailPage() {
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                 configuring ? 'bg-forge-500/50 text-white cursor-wait'
                   : accessToken.trim() ? 'bg-forge-500 hover:bg-forge-600 text-white'
-                  : 'bg-zinc-700 text-zinc-500 cursor-not-allowed'
+                    : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
               }`}
             >
               {configuring ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
-              Conectar
+              {t('gmail.saveConfig')}
             </button>
           </div>
           {configured && (
             <div className="flex items-center gap-2 text-emerald-400 text-sm mt-2">
               <CheckCircle className="w-4 h-4" />
-              Gmail conectado
+              {t('gmail.configured')}
             </div>
           )}
         </div>
@@ -202,7 +203,7 @@ export function GmailPage() {
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && loadInbox()}
-                placeholder="Buscar emails (ex: from:user@gmail.com, is:unread, subject:...)"
+                placeholder={t('gmail.search')}
                 className="w-full bg-zinc-900 border border-zinc-700 rounded-lg pl-9 pr-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-forge-500/50"
               />
             </div>
@@ -220,7 +221,7 @@ export function GmailPage() {
             <div className="w-80 shrink-0 space-y-1 max-h-[600px] overflow-y-auto">
               {messages.length === 0 && !inboxLoading && (
                 <div className="text-center py-8 text-zinc-500 text-sm">
-                  {searchQuery ? 'Nenhum resultado' : 'Inbox vazio'}
+                  {searchQuery ? t('common.noResults') : t('gmail.noMessages')}
                 </div>
               )}
               {messages.map(msg => (
@@ -240,7 +241,7 @@ export function GmailPage() {
                     </span>
                   </div>
                   <p className={`text-sm truncate ${msg.isUnread ? 'text-zinc-200 font-medium' : 'text-zinc-400'}`}>
-                    {msg.subject || '(sem assunto)'}
+                    {msg.subject || t('gmail.noSubject')}
                   </p>
                   <p className="text-[10px] text-zinc-600 truncate mt-0.5">{msg.snippet}</p>
                 </button>
@@ -252,7 +253,7 @@ export function GmailPage() {
               {selectedMsg ? (
                 <div className="bg-zinc-950/50 border border-zinc-800 rounded-xl p-5 space-y-4">
                   <div>
-                    <h3 className="text-lg font-semibold text-white">{selectedMsg.subject || '(sem assunto)'}</h3>
+                    <h3 className="text-lg font-semibold text-white">{selectedMsg.subject || t('gmail.noSubject')}</h3>
                     <div className="flex items-center gap-2 mt-1 text-xs text-zinc-500">
                       <span className="text-zinc-300">{selectedMsg.fromName || selectedMsg.from}</span>
                       <span>&lt;{selectedMsg.from}&gt;</span>
@@ -263,7 +264,7 @@ export function GmailPage() {
                       <span className="text-[10px] text-zinc-600">{selectedMsg.date}</span>
                       {selectedMsg.isUnread && (
                         <button onClick={() => handleMarkRead(selectedMsg.id)} className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-1">
-                          <MailOpen className="w-3 h-3" /> Marcar como lido
+                          <MailOpen className="w-3 h-3" /> {t('gmail.markRead')}
                         </button>
                       )}
                     </div>
@@ -304,7 +305,7 @@ export function GmailPage() {
               ) : (
                 <div className="bg-zinc-950/50 border border-zinc-800 rounded-xl p-8 text-center text-zinc-500">
                   <Eye className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                  <p className="text-sm">Selecione um email para ler</p>
+                  <p className="text-sm">{t('gmail.selectEmail')}</p>
                 </div>
               )}
             </div>
@@ -317,12 +318,12 @@ export function GmailPage() {
         <div className="bg-zinc-950/50 border border-zinc-800 rounded-xl p-6 space-y-4 max-w-2xl">
           <h2 className="text-lg font-semibold text-white flex items-center gap-2">
             <Send className="w-5 h-5 text-forge-400" />
-            Escrever Email
+            {t('gmail.compose')}
           </h2>
 
           <div className="space-y-3">
             <div>
-              <label className="text-xs text-zinc-500 mb-1 block">Para</label>
+              <label className="text-xs text-zinc-500 mb-1 block">{t('gmail.to')}</label>
               <input
                 type="email"
                 value={composeTo}
@@ -332,21 +333,21 @@ export function GmailPage() {
               />
             </div>
             <div>
-              <label className="text-xs text-zinc-500 mb-1 block">Assunto</label>
+              <label className="text-xs text-zinc-500 mb-1 block">{t('gmail.subject')}</label>
               <input
                 type="text"
                 value={composeSubject}
                 onChange={e => setComposeSubject(e.target.value)}
-                placeholder="Assunto do email"
+                placeholder={t('gmail.subject')}
                 className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-forge-500/50"
               />
             </div>
             <div>
-              <label className="text-xs text-zinc-500 mb-1 block">Mensagem</label>
+              <label className="text-xs text-zinc-500 mb-1 block">{t('gmail.body')}</label>
               <textarea
                 value={composeBody}
                 onChange={e => setComposeBody(e.target.value)}
-                placeholder="Escreva sua mensagem..."
+                placeholder={t('gmail.body')}
                 rows={8}
                 className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-3 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-forge-500/50 resize-y"
               />
@@ -364,16 +365,16 @@ export function GmailPage() {
               }`}
             >
               {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-              Enviar
+              {t('gmail.send')}
             </button>
             {sendResult === 'success' && (
               <span className="text-sm text-emerald-400 flex items-center gap-1">
-                <CheckCircle className="w-4 h-4" /> Enviado!
+                <CheckCircle className="w-4 h-4" /> {t('gmail.sent')}
               </span>
             )}
             {sendResult === 'error' && (
               <span className="text-sm text-red-400 flex items-center gap-1">
-                <AlertCircle className="w-4 h-4" /> Erro ao enviar
+                <AlertCircle className="w-4 h-4" /> {t('gmail.sendError')}
               </span>
             )}
           </div>

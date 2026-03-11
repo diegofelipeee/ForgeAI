@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Save, Check, Loader2, Eye, EyeOff, Radio, Wifi, WifiOff, Trash2, Plus, X, Shield, Users, UserPlus, Power, Link2, Copy, Clock, Ticket } from 'lucide-react';
 import { api, type PairingCode } from '@/lib/api';
+import { useI18n } from '@/lib/i18n';
 
 interface ChannelField {
   key: string;
-  label: string;
-  placeholder: string;
+  labelKey: string;
+  placeholderKey: string;
   envKey: string;
 }
 
@@ -13,7 +14,7 @@ interface ChannelMeta {
   name: string;
   displayName: string;
   configured: boolean;
-  description: string;
+  descriptionKey: string;
   fields: ChannelField[];
   hasPermissions: boolean;
 }
@@ -35,9 +36,9 @@ const CHANNELS_META: ChannelMeta[] = [
     name: 'telegram',
     displayName: 'Telegram',
     configured: false,
-    description: 'Bot via grammY — supports text, commands, groups (@mention), inline keyboards',
+    descriptionKey: 'channels.telegramDesc',
     fields: [
-      { key: 'botToken', label: 'Bot Token', placeholder: '123456:ABC-DEF1234ghIkl-zyx57W2v...', envKey: 'TELEGRAM_BOT_TOKEN' },
+      { key: 'botToken', labelKey: 'channels.botToken', placeholderKey: 'channels.telegramBotTokenPlaceholder', envKey: 'TELEGRAM_BOT_TOKEN' },
     ],
     hasPermissions: true,
   },
@@ -45,9 +46,9 @@ const CHANNELS_META: ChannelMeta[] = [
     name: 'discord',
     displayName: 'Discord',
     configured: false,
-    description: 'Bot via discord.js — supports text channels, DMs, slash commands',
+    descriptionKey: 'channels.discordDesc',
     fields: [
-      { key: 'botToken', label: 'Bot Token', placeholder: 'MTk4Nj...', envKey: 'DISCORD_BOT_TOKEN' },
+      { key: 'botToken', labelKey: 'channels.botToken', placeholderKey: 'channels.discordBotTokenPlaceholder', envKey: 'DISCORD_BOT_TOKEN' },
     ],
     hasPermissions: false,
   },
@@ -55,11 +56,11 @@ const CHANNELS_META: ChannelMeta[] = [
     name: 'slack',
     displayName: 'Slack',
     configured: false,
-    description: 'Bot via Bolt — supports channels, DMs, threads, app mentions',
+    descriptionKey: 'channels.slackDesc',
     fields: [
-      { key: 'botToken', label: 'Bot Token (xoxb-)', placeholder: 'xoxb-...', envKey: 'SLACK_BOT_TOKEN' },
-      { key: 'appToken', label: 'App Token (xapp-)', placeholder: 'xapp-...', envKey: 'SLACK_APP_TOKEN' },
-      { key: 'signingSecret', label: 'Signing Secret', placeholder: 'abc123...', envKey: 'SLACK_SIGNING_SECRET' },
+      { key: 'botToken', labelKey: 'channels.slackBotToken', placeholderKey: 'channels.slackBotTokenPlaceholder', envKey: 'SLACK_BOT_TOKEN' },
+      { key: 'appToken', labelKey: 'channels.slackAppToken', placeholderKey: 'channels.slackAppTokenPlaceholder', envKey: 'SLACK_APP_TOKEN' },
+      { key: 'signingSecret', labelKey: 'channels.slackSigningSecret', placeholderKey: 'channels.slackSigningSecretPlaceholder', envKey: 'SLACK_SIGNING_SECRET' },
     ],
     hasPermissions: false,
   },
@@ -67,7 +68,7 @@ const CHANNELS_META: ChannelMeta[] = [
     name: 'whatsapp',
     displayName: 'WhatsApp',
     configured: false,
-    description: 'Via Baileys (QR Code pairing) — supports groups, admin commands (!allow, !block)',
+    descriptionKey: 'channels.whatsappDesc',
     fields: [],
     hasPermissions: true,
   },
@@ -75,10 +76,10 @@ const CHANNELS_META: ChannelMeta[] = [
     name: 'teams',
     displayName: 'Microsoft Teams',
     configured: false,
-    description: 'Via Bot Framework SDK v4 — supports DMs and group chats',
+    descriptionKey: 'channels.teamsDesc',
     fields: [
-      { key: 'appId', label: 'App ID', placeholder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx', envKey: 'TEAMS_APP_ID' },
-      { key: 'appPassword', label: 'App Password', placeholder: 'your-app-password', envKey: 'TEAMS_APP_PASSWORD' },
+      { key: 'appId', labelKey: 'channels.teamsAppId', placeholderKey: 'channels.teamsAppIdPlaceholder', envKey: 'TEAMS_APP_ID' },
+      { key: 'appPassword', labelKey: 'channels.teamsAppPassword', placeholderKey: 'channels.teamsAppPasswordPlaceholder', envKey: 'TEAMS_APP_PASSWORD' },
     ],
     hasPermissions: false,
   },
@@ -86,7 +87,7 @@ const CHANNELS_META: ChannelMeta[] = [
     name: 'webchat',
     displayName: 'WebChat',
     configured: false,
-    description: 'Built-in WebSocket chat — always active, no configuration needed',
+    descriptionKey: 'channels.webchatDesc',
     fields: [],
     hasPermissions: false,
   },
@@ -97,6 +98,7 @@ function PermissionsPanel({ channelName, permissions, onRefresh }: {
   permissions: { allowedUsers: string[]; allowedGroups: string[]; adminUsers: string[]; respondInGroups: 'always' | 'mention' | 'never' };
   onRefresh: () => void;
 }) {
+  const { t } = useI18n();
   const [newUser, setNewUser] = useState('');
   const [newGroup, setNewGroup] = useState('');
   const [newAdmin, setNewAdmin] = useState('');
@@ -146,17 +148,17 @@ function PermissionsPanel({ channelName, permissions, onRefresh }: {
       <div className="flex items-center gap-1.5 text-xs text-zinc-400 font-medium">
         {icon}
         {title}
-        <span className="text-zinc-600">({items.length || 'all'})</span>
+        <span className="text-zinc-600">({items.length || t('common.all')})</span>
       </div>
       <div className="flex flex-wrap gap-1.5">
         {items.length === 0 && (
-          <span className="text-[10px] text-zinc-600 italic">No restrictions (all allowed)</span>
+          <span className="text-[10px] text-zinc-600 italic">{t('channels.noRestrictions')}</span>
         )}
         {items.map(item => (
           <span key={item} className="inline-flex items-center gap-1 bg-zinc-800 text-zinc-300 text-[11px] px-2 py-0.5 rounded-md">
             {item}
             <button
-              title={`Remove ${item}`}
+              title={t('channels.removeItem').replace('{item}', item)}
               onClick={() => removeItem(type, item)}
               disabled={busy}
               className="text-zinc-500 hover:text-red-400 transition-colors"
@@ -176,7 +178,7 @@ function PermissionsPanel({ channelName, permissions, onRefresh }: {
           className="flex-1 bg-zinc-800/50 border border-zinc-700 rounded px-2 py-1 text-[11px] text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-forge-500/50"
         />
         <button
-          title={`Add ${type.slice(0, -1)}`}
+          title={t('channels.addItem').replace('{type}', type.slice(0, -1))}
           onClick={() => addItem(type, inputValue, setInput)}
           disabled={busy || !inputValue.trim()}
           className="px-2 py-1 rounded bg-forge-500/80 hover:bg-forge-500 text-white text-[11px] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
@@ -191,12 +193,12 @@ function PermissionsPanel({ channelName, permissions, onRefresh }: {
     <div className="mt-3 p-3 bg-zinc-900/50 rounded-lg border border-zinc-800 space-y-3">
       <div className="flex items-center gap-1.5 text-xs font-semibold text-zinc-300">
         <Shield className="w-3.5 h-3.5 text-forge-400" />
-        Permissions
-        <span className="text-[10px] text-zinc-600 font-normal ml-auto">Saved to Vault (AES-256-GCM)</span>
+        {t('channels.permissions')}
+        <span className="text-[10px] text-zinc-600 font-normal ml-auto">{t('channels.savedToVault')}</span>
       </div>
 
       <div className="space-y-1">
-        <div className="text-xs text-zinc-400 font-medium">Group Response Mode</div>
+        <div className="text-xs text-zinc-400 font-medium">{t('channels.groupResponseMode')}</div>
         <div className="flex gap-1.5">
           {(['always', 'mention', 'never'] as const).map(mode => (
             <button
@@ -209,28 +211,29 @@ function PermissionsPanel({ channelName, permissions, onRefresh }: {
                   : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
               }`}
             >
-              {mode === 'always' ? 'Always respond' : mode === 'mention' ? 'Only @mention' : 'Never in groups'}
+              {mode === 'always' ? t('channels.respondAlways') : mode === 'mention' ? t('channels.respondMention') : t('channels.respondNever')}
             </button>
           ))}
         </div>
       </div>
 
-      {renderList('Allowed Users', <Users className="w-3 h-3" />, permissions.allowedUsers, 'users', newUser, setNewUser,
-        channelName === 'telegram' ? 'Telegram user ID' : 'Phone number')}
-      {renderList('Allowed Groups', <Users className="w-3 h-3" />, permissions.allowedGroups, 'groups', newGroup, setNewGroup,
-        channelName === 'telegram' ? 'Group ID (e.g. -100...)' : 'Group JID (e.g. ...@g.us)')}
-      {renderList('Admin Users', <UserPlus className="w-3 h-3" />, permissions.adminUsers, 'admins', newAdmin, setNewAdmin,
-        channelName === 'telegram' ? 'Admin user ID' : 'Admin phone')}
+      {renderList(t('channels.allowedUsers'), <Users className="w-3 h-3" />, permissions.allowedUsers, 'users', newUser, setNewUser,
+        channelName === 'telegram' ? t('channels.telegramUserId') : t('channels.phoneNumber'))}
+      {renderList(t('channels.allowedGroups'), <Users className="w-3 h-3" />, permissions.allowedGroups, 'groups', newGroup, setNewGroup,
+        channelName === 'telegram' ? t('channels.telegramGroupId') : t('channels.whatsappGroupJid'))}
+      {renderList(t('channels.adminUsers'), <UserPlus className="w-3 h-3" />, permissions.adminUsers, 'admins', newAdmin, setNewAdmin,
+        channelName === 'telegram' ? t('channels.telegramAdminUserId') : t('channels.adminPhone'))}
       <p className="text-[10px] text-zinc-600">
         {channelName === 'telegram'
-          ? 'Tip: Use /myid in Telegram to get your user ID. Admin commands: /allow, /block, /listusers, /status'
-          : 'Tip: Use !myid in WhatsApp to get your phone ID. Admin commands: !allow, !block, !listusers, !status'}
+          ? t('channels.tipTelegram')
+          : t('channels.tipWhatsapp')}
       </p>
     </div>
   );
 }
 
 function PairingPanel() {
+  const { t } = useI18n();
   const [codes, setCodes] = useState<PairingCode[]>([]);
   const [generating, setGenerating] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
@@ -271,7 +274,7 @@ function PairingPanel() {
   const isFull = (c: PairingCode) => c.usedBy.length >= c.maxUses;
   const timeLeft = (c: PairingCode) => {
     const ms = new Date(c.expiresAt).getTime() - Date.now();
-    if (ms <= 0) return 'Expirado';
+    if (ms <= 0) return t('channels.expired');
     const h = Math.floor(ms / 3600000);
     const m = Math.floor((ms % 3600000) / 60000);
     return h > 0 ? `${h}h ${m}m` : `${m}m`;
@@ -285,47 +288,47 @@ function PairingPanel() {
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-white flex items-center gap-2">
           <Link2 className="w-5 h-5 text-forge-400" />
-          Pairing Codes
+          {t('channels.pairingCodes')}
         </h2>
         <span className="text-xs text-zinc-500">
-          {activeCodes.length} active
+          {t('channels.activeCount').replace('{count}', String(activeCodes.length))}
         </span>
       </div>
 
       <div className="rounded-xl border border-zinc-800 p-5 space-y-4">
         <p className="text-xs text-zinc-400">
-          Gere códigos de convite para novos usuários. Eles digitam <code className="bg-zinc-800 px-1 rounded text-forge-400">/pair CODIGO</code> no Telegram ou WhatsApp para se conectar automaticamente.
+          {t('channels.pairingDesc')}
         </p>
 
         {/* Generate form */}
         <div className="flex flex-wrap items-end gap-3">
           <div className="flex-1 min-w-[140px]">
-            <label className="text-[11px] text-zinc-500 mb-1 block">Label (opcional)</label>
+            <label className="text-[11px] text-zinc-500 mb-1 block">{t('channels.labelOptional')}</label>
             <input
               type="text"
-              placeholder="Ex: Convite João"
+              placeholder={t('channels.labelPlaceholder')}
               value={label}
               onChange={e => setLabel(e.target.value)}
               className="w-full bg-zinc-800/50 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-forge-500/50"
             />
           </div>
           <div className="w-24">
-            <label className="text-[11px] text-zinc-500 mb-1 block">Nível</label>
+            <label className="text-[11px] text-zinc-500 mb-1 block">{t('channels.accessLevel')}</label>
             <select
-              title="Nível de acesso"
+              title={t('channels.accessLevel')}
               value={role}
               onChange={e => setRole(e.target.value as 'user' | 'admin')}
               className="w-full bg-zinc-800/50 border border-zinc-700 rounded-lg px-2 py-2 text-sm text-zinc-200 focus:outline-none focus:ring-1 focus:ring-forge-500/50"
             >
-              <option value="user">Usuário</option>
-              <option value="admin">Admin</option>
+              <option value="user">{t('channels.user')}</option>
+              <option value="admin">{t('channels.admin')}</option>
             </select>
           </div>
           <div className="w-20">
-            <label className="text-[11px] text-zinc-500 mb-1 block">Max usos</label>
+            <label className="text-[11px] text-zinc-500 mb-1 block">{t('channels.maxUses')}</label>
             <input
               type="number"
-              title="Máximo de usos"
+              title={t('channels.maxUses')}
               min={1}
               max={100}
               value={maxUses}
@@ -334,18 +337,18 @@ function PairingPanel() {
             />
           </div>
           <div className="w-24">
-            <label className="text-[11px] text-zinc-500 mb-1 block">Expira em</label>
+            <label className="text-[11px] text-zinc-500 mb-1 block">{t('channels.expiresIn')}</label>
             <select
-              title="Tempo de expiração"
+              title={t('channels.expiresIn')}
               value={expiresIn}
               onChange={e => setExpiresIn(Number(e.target.value))}
               className="w-full bg-zinc-800/50 border border-zinc-700 rounded-lg px-2 py-2 text-sm text-zinc-200 focus:outline-none focus:ring-1 focus:ring-forge-500/50"
             >
-              <option value={1}>1 hora</option>
-              <option value={6}>6 horas</option>
-              <option value={24}>24 horas</option>
-              <option value={168}>7 dias</option>
-              <option value={720}>30 dias</option>
+              <option value={1}>{t('channels.expires1h')}</option>
+              <option value={6}>{t('channels.expires6h')}</option>
+              <option value={24}>{t('channels.expires24h')}</option>
+              <option value={168}>{t('channels.expires7d')}</option>
+              <option value={720}>{t('channels.expires30d')}</option>
             </select>
           </div>
           <button
@@ -354,7 +357,7 @@ function PairingPanel() {
             className="flex items-center gap-2 px-4 py-2 rounded-lg bg-forge-500 hover:bg-forge-600 text-white text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Ticket className="w-4 h-4" />}
-            Gerar Código
+            {t('channels.generateCode')}
           </button>
         </div>
 
@@ -362,13 +365,13 @@ function PairingPanel() {
         {activeCodes.length > 0 && (
           <div className="space-y-2">
             <div className="text-xs text-zinc-400 font-medium flex items-center gap-1">
-              <Link2 className="w-3 h-3" /> Códigos Ativos
+              <Link2 className="w-3 h-3" /> {t('channels.activeCodes')}
             </div>
             {activeCodes.map(c => (
               <div key={c.code} className="flex items-center gap-3 bg-zinc-800/50 rounded-lg px-4 py-3 border border-zinc-700/50">
                 <code className="text-forge-400 font-mono text-sm font-bold tracking-wider">{c.code}</code>
                 <button
-                  title="Copiar código"
+                  title={t('common.copy')}
                   onClick={() => copyCode(c.code)}
                   className="text-zinc-500 hover:text-forge-400 transition-colors"
                 >
@@ -377,16 +380,16 @@ function PairingPanel() {
                 <div className="flex-1 flex items-center gap-3 text-[11px] text-zinc-500">
                   {c.label && <span className="text-zinc-400">{c.label}</span>}
                   <span className={c.role === 'admin' ? 'text-amber-400' : 'text-zinc-400'}>
-                    {c.role === 'admin' ? '👑 Admin' : '👤 User'}
+                    {c.role === 'admin' ? t('channels.adminBadge') : t('channels.userBadge')}
                   </span>
                   <span className="flex items-center gap-1">
                     <Clock className="w-3 h-3" />
                     {timeLeft(c)}
                   </span>
-                  <span>{c.usedBy.length}/{c.maxUses} usos</span>
+                  <span>{t('channels.usesCount').replace('{used}', String(c.usedBy.length)).replace('{max}', String(c.maxUses))}</span>
                 </div>
                 <button
-                  title="Revogar código"
+                  title={t('common.revoke')}
                   onClick={() => revoke(c.code)}
                   className="text-zinc-600 hover:text-red-400 transition-colors"
                 >
@@ -400,17 +403,17 @@ function PairingPanel() {
         {/* Used/expired codes */}
         {usedCodes.length > 0 && (
           <div className="space-y-2">
-            <div className="text-xs text-zinc-500 font-medium">Expirados / Usados</div>
+            <div className="text-xs text-zinc-500 font-medium">{t('channels.expiredOrUsed')}</div>
             {usedCodes.slice(0, 5).map(c => (
               <div key={c.code} className="flex items-center gap-3 bg-zinc-900/50 rounded-lg px-4 py-2 border border-zinc-800/50 opacity-60">
                 <code className="text-zinc-500 font-mono text-xs">{c.code}</code>
                 <div className="flex-1 flex items-center gap-3 text-[10px] text-zinc-600">
                   {c.label && <span>{c.label}</span>}
-                  <span>{isExpired(c) ? 'Expirado' : `${c.usedBy.length}/${c.maxUses} usos`}</span>
-                  {c.usedBy.length > 0 && <span>por: {c.usedBy.join(', ')}</span>}
+                  <span>{isExpired(c) ? t('channels.expired') : t('channels.usesCount').replace('{used}', String(c.usedBy.length)).replace('{max}', String(c.maxUses))}</span>
+                  {c.usedBy.length > 0 && <span>{t('channels.usedBy').replace('{users}', c.usedBy.join(', '))}</span>}
                 </div>
                 <button
-                  title="Remover"
+                  title={t('common.delete')}
                   onClick={() => revoke(c.code)}
                   className="text-zinc-700 hover:text-red-400 transition-colors"
                 >
@@ -423,7 +426,7 @@ function PairingPanel() {
 
         {codes.length === 0 && (
           <p className="text-xs text-zinc-600 italic text-center py-2">
-            Nenhum código gerado ainda. Clique em "Gerar Código" para criar um convite.
+            {t('channels.noCodesYet')}
           </p>
         )}
       </div>
@@ -432,6 +435,7 @@ function PairingPanel() {
 }
 
 export function ChannelsPage() {
+  const { t } = useI18n();
   const [channels, setChannels] = useState<ChannelMeta[]>(CHANNELS_META);
   const [liveChannels, setLiveChannels] = useState<LiveChannel[]>([]);
   const [values, setValues] = useState<Record<string, Record<string, string>>>({});
@@ -518,7 +522,7 @@ export function ChannelsPage() {
 
   const handleRemove = async (channelName: string) => {
     const ch = channels.find(c => c.name === channelName);
-    if (!confirm(`Remove tokens for ${ch?.displayName ?? channelName}?`)) return;
+    if (!confirm(t('channels.removeTokensConfirm').replace('{channel}', ch?.displayName ?? channelName))) return;
     setDeleting(s => ({ ...s, [channelName]: true }));
     try {
       await api.del(`/api/channels/${channelName}/key`);
@@ -537,24 +541,24 @@ export function ChannelsPage() {
   return (
     <div className="p-8 space-y-8 max-w-3xl">
       <div>
-        <h1 className="text-2xl font-bold text-white">Channels</h1>
-        <p className="text-sm text-zinc-400 mt-1">Configure messaging channels, bot connections, and permissions</p>
+        <h1 className="text-2xl font-bold text-white">{t('channels.title')}</h1>
+        <p className="text-sm text-zinc-400 mt-1">{t('channels.configure')}</p>
       </div>
 
       <section className="space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-white flex items-center gap-2">
             <Radio className="w-5 h-5 text-forge-400" />
-            Messaging Channels
+            {t('channels.messagingChannels')}
           </h2>
           <div className="flex items-center gap-3">
             <span className="text-xs text-zinc-500">
-              {connectedCount}/{channels.length} configured
+              {t('channels.configuredCount').replace('{configured}', String(connectedCount)).replace('{total}', String(channels.length))}
             </span>
             {liveCount > 0 && (
               <span className="text-xs text-emerald-400 flex items-center gap-1">
                 <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse" />
-                {liveCount} live
+                {t('channels.liveCount').replace('{count}', String(liveCount))}
               </span>
             )}
           </div>
@@ -584,7 +588,7 @@ export function ChannelsPage() {
                       )}
                       {(channel.hasPermissions || live?.hasPermissions) && (
                         <button
-                          title="Toggle permissions"
+                          title={t('channels.togglePermissions')}
                           onClick={() => setExpandedPerms(s => ({ ...s, [channel.name]: !permsExpanded }))}
                           className={`text-[10px] px-1.5 py-0.5 rounded transition-colors ${
                             permsExpanded
@@ -593,11 +597,11 @@ export function ChannelsPage() {
                           }`}
                         >
                           <Shield className="w-3 h-3 inline mr-0.5" />
-                          Permissions
+                          {t('channels.permissions')}
                         </button>
                       )}
                     </div>
-                    <p className="text-[11px] text-zinc-500 mt-0.5">{channel.description}</p>
+                    <p className="text-[11px] text-zinc-500 mt-0.5">{t(channel.descriptionKey)}</p>
                   </div>
                   <span className={`text-xs px-2 py-0.5 rounded-full ${
                     isLive
@@ -608,45 +612,46 @@ export function ChannelsPage() {
                           ? 'bg-zinc-700 text-zinc-400'
                           : 'bg-zinc-700 text-zinc-400'
                   }`}>
-                    {isLive ? 'Live'
-                      : channel.name === 'whatsapp' && waEnabled ? 'Enabled (restart)'
-                      : channel.configured ? 'Configured'
-                      : channel.name === 'webchat' ? 'Always on'
-                      : 'Not set'}
+                    {isLive ? t('common.live')
+                      : channel.name === 'whatsapp' && waEnabled ? t('channels.enabledRestart')
+                      : channel.configured ? t('channels.configured')
+                      : channel.name === 'webchat' ? t('channels.alwaysOn')
+                      : t('channels.notSet')}
                   </span>
                 </div>
 
                 {channel.fields.length > 0 && (
                   <div className="space-y-2">
-                    {channel.fields.map(field => {
+                    {channel.fields.map((field, index) => {
                       const fieldKey = `${channel.name}:${field.key}`;
                       const isVisible = showField[fieldKey] ?? false;
 
                       return (
                         <div key={field.key}>
-                          <label className="text-xs text-zinc-400 mb-1 block">{field.label}</label>
+                          <label className="text-xs text-zinc-400 mb-1 block">{t(field.labelKey)}</label>
                           <div className="flex gap-2">
                             <div className="flex-1 relative">
                               <input
                                 type={isVisible ? 'text' : 'password'}
-                                placeholder={channel.configured ? '••••••••••••' : field.placeholder}
+                                placeholder={channel.configured ? '••••••••••••' : t(field.placeholderKey)}
                                 value={values[channel.name]?.[field.key] ?? ''}
                                 onChange={e => updateValue(channel.name, field.key, e.target.value)}
                                 onKeyDown={e => e.key === 'Enter' && handleSave(channel.name)}
                                 className="w-full bg-zinc-800/50 border border-zinc-700 rounded-lg px-3 py-2 pr-9 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-forge-500/50"
                               />
                               <button
-                                aria-label={isVisible ? 'Hide' : 'Show'}
+                                aria-label={isVisible ? t('channels.hide') : t('channels.show')}
                                 onClick={() => setShowField(s => ({ ...s, [fieldKey]: !isVisible }))}
                                 className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
                               >
                                 {isVisible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                               </button>
                             </div>
-                            {field === channel.fields[channel.fields.length - 1] && (
+
+                            {index === channel.fields.length - 1 && (
                               <>
                                 <button
-                                  aria-label={`Save ${channel.displayName} config`}
+                                  aria-label={t('channels.saveConfigAria').replace('{channel}', channel.displayName)}
                                   onClick={() => handleSave(channel.name)}
                                   disabled={isSaving || !hasValues(channel.name)}
                                   className={`px-3 py-2 rounded-lg text-white text-xs font-medium transition-all ${
@@ -661,9 +666,10 @@ export function ChannelsPage() {
                                 >
                                   {isSaved ? <Check className="w-4 h-4" /> : isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                                 </button>
+
                                 {channel.configured && channel.name !== 'webchat' && (
                                   <button
-                                    aria-label={`Remove ${channel.displayName} config`}
+                                    aria-label={t('channels.removeConfigAria').replace('{channel}', channel.displayName)}
                                     onClick={() => handleRemove(channel.name)}
                                     disabled={deleting[channel.name]}
                                     className="px-3 py-2 rounded-lg text-red-400 hover:text-white hover:bg-red-500/80 border border-red-500/30 text-xs font-medium transition-all"
@@ -677,7 +683,7 @@ export function ChannelsPage() {
                         </div>
                       );
                     })}
-                    <p className="text-[10px] text-zinc-500">Stored encrypted in Vault (AES-256-GCM)</p>
+                    <p className="text-[10px] text-zinc-500">{t('channels.storedEncrypted')}</p>
                   </div>
                 )}
 
@@ -694,19 +700,19 @@ export function ChannelsPage() {
                         }`}
                       >
                         {waToggling ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Power className="w-3.5 h-3.5" />}
-                        {waEnabled || isLive ? 'Disable WhatsApp' : 'Enable WhatsApp'}
+                        {waEnabled || isLive ? t('channels.disableWhatsapp') : t('channels.enableWhatsapp')}
                       </button>
-                      {isLive && <span className="text-[10px] text-emerald-400">Connected</span>}
-                      {waEnabled && !isLive && <span className="text-[10px] text-amber-400">Restart gateway to start QR pairing</span>}
+                      {isLive && <span className="text-[10px] text-emerald-400">{t('common.connected')}</span>}
+                      {waEnabled && !isLive && <span className="text-[10px] text-amber-400">{t('channels.restartGatewayQr')}</span>}
                     </div>
                     <p className="text-[10px] text-zinc-500">
-                      WhatsApp connects via QR code pairing (Baileys). No API key needed — enable and restart to scan QR.
+                      {t('channels.whatsappHelp')}
                     </p>
                   </div>
                 )}
 
                 {noFields && channel.name === 'webchat' && (
-                  <p className="text-xs text-zinc-500 italic">WebSocket endpoint: ws://127.0.0.1:18800/ws</p>
+                  <p className="text-xs text-zinc-500 italic">{t('channels.websocketEndpoint')}</p>
                 )}
 
                 {(channel.hasPermissions || live?.hasPermissions) && permsExpanded && live?.permissions && (

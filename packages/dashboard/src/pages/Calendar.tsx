@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { CalendarDays, Plus, Loader2, Key, CheckCircle, Clock, MapPin, Users, Trash2, Zap, ChevronLeft, ChevronRight } from 'lucide-react';
+import { useI18n } from '@/lib/i18n';
 
 interface CalendarEvent {
   id: string;
@@ -18,6 +19,7 @@ interface CalendarEvent {
 type CalTab = 'events' | 'create' | 'config';
 
 export function CalendarPage() {
+  const { t } = useI18n();
   const [configured, setConfigured] = useState(false);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<CalTab>('events');
@@ -113,7 +115,7 @@ export function CalendarPage() {
   };
 
   const formatTime = (iso: string, allDay: boolean) => {
-    if (allDay) return 'Dia inteiro';
+    if (allDay) return t('calendar.allDay');
     try {
       const d = new Date(iso);
       return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
@@ -135,23 +137,23 @@ export function CalendarPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-            <CalendarDays className="w-6 h-6 text-blue-400" /> Calendar
+            <CalendarDays className="w-6 h-6 text-blue-400" /> {t('calendar.title')}
           </h1>
           <p className="text-sm text-zinc-400 mt-1">
-            {configured ? `${events.length} eventos nos próximos ${viewDays} dias` : 'Configure o Google Calendar'}
+            {configured ? t('calendar.upcoming').replace('{count}', String(events.length)).replace('{days}', String(viewDays)) : t('calendar.notConfigured')}
           </p>
         </div>
         {configured && (
           <div className="flex items-center gap-2">
-            {(['events', 'create', 'config'] as CalTab[]).map(t => (
-              <button key={t} onClick={() => { setTab(t); setSelectedEvent(null); }}
+            {(['events', 'create', 'config'] as CalTab[]).map(ct => (
+              <button key={ct} onClick={() => { setTab(ct); setSelectedEvent(null); }}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                  tab === t ? 'bg-forge-500/20 text-forge-400 border border-forge-500/30' : 'bg-zinc-800/50 text-zinc-400 hover:text-zinc-200 border border-transparent'
+                  tab === ct ? 'bg-forge-500/20 text-forge-400 border border-forge-500/30' : 'bg-zinc-800/50 text-zinc-400 hover:text-zinc-200 border border-transparent'
                 }`}>
-                {t === 'events' && <CalendarDays className="w-3.5 h-3.5" />}
-                {t === 'create' && <Plus className="w-3.5 h-3.5" />}
-                {t === 'config' && <Key className="w-3.5 h-3.5" />}
-                {t === 'events' ? 'Eventos' : t === 'create' ? 'Criar' : 'Config'}
+                {ct === 'events' && <CalendarDays className="w-3.5 h-3.5" />}
+                {ct === 'create' && <Plus className="w-3.5 h-3.5" />}
+                {ct === 'config' && <Key className="w-3.5 h-3.5" />}
+                {ct === 'events' ? t('calendar.events') : ct === 'create' ? t('calendar.create') : t('calendar.config')}
               </button>
             ))}
           </div>
@@ -162,13 +164,13 @@ export function CalendarPage() {
       {tab === 'config' && (
         <div className="bg-zinc-950/50 border border-zinc-800 rounded-xl p-6 space-y-4">
           <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-            <Key className="w-5 h-5 text-amber-400" /> Configurar Google Calendar
+            <Key className="w-5 h-5 text-amber-400" /> {t('calendar.saveConfig')}
           </h2>
           <p className="text-sm text-zinc-400">
             Use um OAuth2 Access Token do Google com scopes calendar.readonly + calendar.events.
           </p>
           <div>
-            <label className="text-xs text-zinc-500 mb-1 block">Access Token</label>
+            <label className="text-xs text-zinc-500 mb-1 block">{t('calendar.accessToken')}</label>
             <input type="password" value={accessToken} onChange={e => setAccessToken(e.target.value)}
               placeholder="ya29.a0..." className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-forge-500/50" />
           </div>
@@ -176,9 +178,9 @@ export function CalendarPage() {
             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
               configuring ? 'bg-forge-500/50 text-white cursor-wait' : accessToken.trim() ? 'bg-forge-500 hover:bg-forge-600 text-white' : 'bg-zinc-700 text-zinc-500 cursor-not-allowed'
             }`}>
-            {configuring ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />} Conectar
+            {configuring ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />} {t('calendar.connect')}
           </button>
-          {configured && <div className="flex items-center gap-2 text-emerald-400 text-sm"><CheckCircle className="w-4 h-4" /> Calendar conectado</div>}
+          {configured && <div className="flex items-center gap-2 text-emerald-400 text-sm"><CheckCircle className="w-4 h-4" /> {t('calendar.connected')}</div>}
         </div>
       )}
 
@@ -191,13 +193,13 @@ export function CalendarPage() {
               <Zap className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
               <input type="text" value={quickText} onChange={e => setQuickText(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleQuickAdd()}
-                placeholder="Quick add: 'Reunião amanhã 14h' ou 'Dentista sexta 10:00'"
+                placeholder={t('calendar.quickAddPlaceholder')}
                 className="w-full bg-zinc-900 border border-zinc-700 rounded-lg pl-9 pr-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50" />
             </div>
             <div className="flex items-center gap-1">
-              <button onClick={() => setViewDays(Math.max(1, viewDays - 7))} title="Menos dias" className="p-2 rounded-lg bg-zinc-800 text-zinc-400 hover:text-zinc-200"><ChevronLeft className="w-4 h-4" /></button>
+              <button onClick={() => setViewDays(Math.max(1, viewDays - 7))} title={t('calendar.lessDays')} className="p-2 rounded-lg bg-zinc-800 text-zinc-400 hover:text-zinc-200"><ChevronLeft className="w-4 h-4" /></button>
               <span className="text-xs text-zinc-500 w-16 text-center">{viewDays}d</span>
-              <button onClick={() => setViewDays(viewDays + 7)} title="Mais dias" className="p-2 rounded-lg bg-zinc-800 text-zinc-400 hover:text-zinc-200"><ChevronRight className="w-4 h-4" /></button>
+              <button onClick={() => setViewDays(viewDays + 7)} title={t('calendar.moreDays')} className="p-2 rounded-lg bg-zinc-800 text-zinc-400 hover:text-zinc-200"><ChevronRight className="w-4 h-4" /></button>
             </div>
           </div>
 
@@ -206,7 +208,7 @@ export function CalendarPage() {
             <div className="w-80 shrink-0 space-y-1 max-h-[600px] overflow-y-auto">
               {eventsLoading && <div className="py-4 text-center"><Loader2 className="w-4 h-4 animate-spin mx-auto text-zinc-500" /></div>}
               {!eventsLoading && events.length === 0 && (
-                <div className="text-center py-8 text-zinc-500 text-sm">Nenhum evento</div>
+                <div className="text-center py-8 text-zinc-500 text-sm">{t('calendar.noEvents')}</div>
               )}
               {events.map(ev => (
                 <button key={ev.id} onClick={() => setSelectedEvent(ev)}
@@ -255,9 +257,9 @@ export function CalendarPage() {
                   <div className="flex items-center gap-2 pt-2">
                     {selectedEvent.htmlLink && (
                       <a href={selectedEvent.htmlLink} target="_blank" rel="noopener noreferrer"
-                        className="text-xs text-blue-400 hover:text-blue-300">Abrir no Google Calendar ↗</a>
+                        className="text-xs text-blue-400 hover:text-blue-300">{t('calendar.openGoogle')} ↗</a>
                     )}
-                    <button onClick={() => handleDelete(selectedEvent.id)} title="Deletar evento"
+                    <button onClick={() => handleDelete(selectedEvent.id)} title={t('calendar.deleteEvent')}
                       className="ml-auto p-1.5 rounded text-zinc-600 hover:text-red-400 transition-colors">
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -266,7 +268,7 @@ export function CalendarPage() {
               ) : (
                 <div className="bg-zinc-950/50 border border-zinc-800 rounded-xl p-8 text-center text-zinc-500">
                   <CalendarDays className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                  <p className="text-sm">Selecione um evento</p>
+                  <p className="text-sm">{t('calendar.selectEvent')}</p>
                 </div>
               )}
             </div>
@@ -277,36 +279,36 @@ export function CalendarPage() {
       {/* Create */}
       {tab === 'create' && configured && (
         <div className="bg-zinc-950/50 border border-zinc-800 rounded-xl p-6 space-y-4 max-w-2xl">
-          <h2 className="text-lg font-semibold text-white flex items-center gap-2"><Plus className="w-5 h-5 text-blue-400" /> Criar Evento</h2>
+          <h2 className="text-lg font-semibold text-white flex items-center gap-2"><Plus className="w-5 h-5 text-blue-400" /> {t('calendar.createEvent')}</h2>
           <div className="space-y-3">
             <div>
-              <label className="text-xs text-zinc-500 mb-1 block">Título</label>
+              <label className="text-xs text-zinc-500 mb-1 block">{t('calendar.summary')}</label>
               <input type="text" value={newEvent.summary} onChange={e => setNewEvent(s => ({ ...s, summary: e.target.value }))}
-                placeholder="Reunião de equipe" className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-forge-500/50" />
+                placeholder={t('calendar.summaryPlaceholder')} className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-forge-500/50" />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs text-zinc-500 mb-1 block">Início</label>
+                <label className="text-xs text-zinc-500 mb-1 block">{t('calendar.startDate')}</label>
                 <input type="datetime-local" value={newEvent.start} onChange={e => setNewEvent(s => ({ ...s, start: e.target.value }))}
-                  title="Data/hora de início"
+                  title={t('calendar.startDateTitle')}
                   className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:ring-2 focus:ring-forge-500/50" />
               </div>
               <div>
-                <label className="text-xs text-zinc-500 mb-1 block">Fim</label>
+                <label className="text-xs text-zinc-500 mb-1 block">{t('calendar.endDate')}</label>
                 <input type="datetime-local" value={newEvent.end} onChange={e => setNewEvent(s => ({ ...s, end: e.target.value }))}
-                  title="Data/hora de fim"
+                  title={t('calendar.endDateTitle')}
                   className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:ring-2 focus:ring-forge-500/50" />
               </div>
             </div>
             <div>
-              <label className="text-xs text-zinc-500 mb-1 block">Local</label>
+              <label className="text-xs text-zinc-500 mb-1 block">{t('calendar.location')}</label>
               <input type="text" value={newEvent.location} onChange={e => setNewEvent(s => ({ ...s, location: e.target.value }))}
-                placeholder="Sala 3 / Google Meet" className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-forge-500/50" />
+                placeholder={t('calendar.locationPlaceholder')} className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-forge-500/50" />
             </div>
             <div>
-              <label className="text-xs text-zinc-500 mb-1 block">Descrição</label>
+              <label className="text-xs text-zinc-500 mb-1 block">{t('calendar.description')}</label>
               <textarea value={newEvent.description} onChange={e => setNewEvent(s => ({ ...s, description: e.target.value }))}
-                placeholder="Detalhes do evento..." rows={3}
+                placeholder={t('calendar.descriptionPlaceholder')} rows={3}
                 className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-forge-500/50 resize-y" />
             </div>
           </div>
@@ -315,10 +317,10 @@ export function CalendarPage() {
               className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all ${
                 creating ? 'bg-blue-500/50 text-white cursor-wait' : (newEvent.summary && newEvent.start && newEvent.end) ? 'bg-blue-500 hover:bg-blue-600 text-white' : 'bg-zinc-700 text-zinc-500 cursor-not-allowed'
               }`}>
-              {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />} Criar
+              {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />} {t('calendar.create')}
             </button>
-            {createResult === 'success' && <span className="text-sm text-emerald-400 flex items-center gap-1"><CheckCircle className="w-4 h-4" /> Criado!</span>}
-            {createResult === 'error' && <span className="text-sm text-red-400">Erro ao criar</span>}
+            {createResult === 'success' && <span className="text-sm text-emerald-400 flex items-center gap-1"><CheckCircle className="w-4 h-4" /> {t('calendar.createSuccess')}</span>}
+            {createResult === 'error' && <span className="text-sm text-red-400">{t('calendar.createError')}</span>}
           </div>
         </div>
       )}
