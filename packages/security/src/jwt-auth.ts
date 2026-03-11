@@ -5,11 +5,12 @@ import type { UserRole } from '@forgeai/shared';
 
 const logger = createLogger('Security:JWTAuth');
 
-interface JWTPayload {
+export interface JWTPayload {
   userId: string;
   username: string;
   role: UserRole;
   sessionId?: string;
+  ipAddress?: string;
 }
 
 export interface TokenPair {

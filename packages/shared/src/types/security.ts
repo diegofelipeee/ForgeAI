@@ -45,7 +45,9 @@ export type AuditAction =
   | 'tool.indirect_injection_blocked'
   | 'tool.sensitive_file_blocked'
   | 'tool.exfiltration_blocked'
-  | 'tool.persistence_blocked';
+  | 'tool.persistence_blocked'
+  | 'auth.ip_mismatch'
+  | 'auth.csrf_failed';
 
 export interface AuditLogEntry {
   id: string;
