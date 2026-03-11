@@ -11,6 +11,7 @@ export interface SMTPConfig {
   user: string;
   pass: string;
   from: string;    // e.g. "ForgeAI <noreply@yourdomain.com>"
+  rejectUnauthorized?: boolean; // TLS cert validation (default: true)
 }
 
 export interface PendingEmailOTP {
@@ -43,7 +44,7 @@ export class EmailOTPService {
         pass: config.pass,
       },
       tls: {
-        rejectUnauthorized: false, // Allow self-signed certs for internal SMTP
+        rejectUnauthorized: config.rejectUnauthorized !== false, // Default: true (validate certs). Set to false for self-signed.
       },
     });
     logger.info('SMTP configured', { host: config.host, port: config.port, from: config.from });
@@ -65,6 +66,7 @@ export class EmailOTPService {
       return false;
     }
 
+    const rejectUnauthorized = process.env['SMTP_TLS_REJECT_UNAUTHORIZED'];
     this.configure({
       host,
       port: Number(port) || 587,
@@ -72,6 +74,7 @@ export class EmailOTPService {
       user,
       pass,
       from: from || `ForgeAI <${user}>`,
+      rejectUnauthorized: rejectUnauthorized !== 'false', // Default: true. Set SMTP_TLS_REJECT_UNAUTHORIZED=false for self-signed certs.
     });
     return true;
   }

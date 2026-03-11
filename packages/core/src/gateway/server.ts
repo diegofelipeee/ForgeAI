@@ -78,7 +78,7 @@ export class Gateway {
   private static readonly LOCALHOST_IPS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 
   // Pending sessions: access token validated but 2FA not yet verified
-  private pendingSessions: Map<string, { createdAt: number; ip: string; totpVerified?: boolean }> = new Map();
+  private pendingSessions: Map<string, { createdAt: number; ip: string; totpVerified?: boolean; csrfToken: string }> = new Map();
 
   // Rate limiter for auth endpoints (brute-force protection)
   private authAttempts: Map<string, { count: number; firstAttempt: number }> = new Map();
@@ -138,14 +138,38 @@ export class Gateway {
 
   async initialize(): Promise<void> {
     // Register plugins
+    // CORS: restrict origins in production. Only allow PUBLIC_URL or same-origin.
+    // In dev mode (GATEWAY_AUTH=false), allow any origin for convenience.
+    const corsOrigins: string[] = [];
+    const publicUrl = process.env['PUBLIC_URL'];
+    if (publicUrl) corsOrigins.push(publicUrl.replace(/\/$/, ''));
+    // Always allow localhost variants for local development
+    corsOrigins.push(`http://127.0.0.1:${this.port}`, `http://localhost:${this.port}`);
+    const isDev = process.env['GATEWAY_AUTH'] === 'false';
+
     await this.app.register(cors, {
-      origin: true,
+      origin: isDev ? true : corsOrigins,
       credentials: true,
     });
 
     await this.app.register(websocket);
     await this.app.register(multipart, { limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB max
     await this.app.register(formbody); // For HTML form POST (2FA forms)
+
+    // Security headers (helmet-style) — applied to all responses
+    this.app.addHook('onSend', async (_request, reply, payload) => {
+      reply.header('X-Content-Type-Options', 'nosniff');
+      reply.header('X-Frame-Options', 'DENY');
+      reply.header('X-XSS-Protection', '0'); // Modern browsers use CSP; legacy header disabled per OWASP
+      reply.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+      reply.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+      reply.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+      // CSP: allow inline styles (used by auth forms) and data: URIs (QR codes), block everything else
+      reply.header('Content-Security-Policy',
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' wss: ws:; frame-ancestors 'none'; base-uri 'self'; form-action 'self';"
+      );
+      return payload;
+    });
 
     // Register routes
     this.registerHealthRoutes();
@@ -340,8 +364,22 @@ export class Gateway {
         const jwt = this.extractJWT(request);
         if (jwt) {
           try {
-            this.auth.verifyAccessToken(jwt);
-            return; // Valid session — allow through
+            const payload = this.auth.verifyAccessToken(jwt);
+            // IP binding: reject if token was issued for a different IP
+            if (payload.ipAddress && payload.ipAddress !== request.ip) {
+              this.auditLogger.log({
+                action: 'auth.ip_mismatch',
+                userId: payload.userId,
+                ipAddress: request.ip,
+                details: { tokenIp: payload.ipAddress, requestIp: request.ip },
+                success: false,
+                riskLevel: 'critical',
+              });
+              reply.header('Set-Cookie', 'forgeai_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0');
+              // Don't reveal the reason to potential attacker
+            } else {
+              return; // Valid session + matching IP — allow through
+            }
           } catch {
             // Invalid/expired token — clear cookie and block
             reply.header('Set-Cookie', 'forgeai_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0');
@@ -430,14 +468,13 @@ export class Gateway {
             riskLevel: 'high',
           });
 
-          // Hard enforcement: block if the request has an auth token (authenticated non-admin)
-          // OR if RBAC_ENFORCE is enabled (block everything including anonymous)
-          const enforceAll = process.env['RBAC_ENFORCE'] === 'true';
-          if (hasToken || enforceAll) {
+          // Hard enforcement by default: block ALL non-admin requests to admin routes.
+          // Set RBAC_ENFORCE=false to revert to soft mode (allow anonymous through).
+          const softMode = process.env['RBAC_ENFORCE'] === 'false';
+          if (!softMode) {
             reply.status(403).send({ error: 'Access denied', requiredRole: 'admin', path, method });
             return;
           }
-          // Anonymous (no token) — allow through (soft enforcement) until dashboard auth is integrated
         }
       }
     });
@@ -499,7 +536,6 @@ export class Gateway {
         version: APP_VERSION,
         checks: [
           { name: 'gateway', status: 'pass' },
-          { name: 'security', status: 'pass' },
         ],
       };
       return status;
@@ -509,16 +545,6 @@ export class Gateway {
       return {
         name: APP_NAME,
         version: APP_VERSION,
-        uptime: Date.now() - this.startedAt,
-        security: {
-          rbac: true,
-          vault: this.vault.isInitialized(),
-          rateLimiter: true,
-          promptGuard: true,
-          inputSanitizer: true,
-          twoFactor: true,
-          auditLog: true,
-        },
       };
     });
 
@@ -817,7 +843,8 @@ export class Gateway {
       // Token valid — create pending session awaiting 2FA
       const { randomBytes } = await import('node:crypto');
       const pendingId = randomBytes(24).toString('base64url');
-      this.pendingSessions.set(pendingId, { createdAt: Date.now(), ip: request.ip });
+      const csrfToken = randomBytes(32).toString('base64url');
+      this.pendingSessions.set(pendingId, { createdAt: Date.now(), ip: request.ip, csrfToken });
 
       this.auditLogger.log({
         action: 'auth.access_token_used',
@@ -838,12 +865,12 @@ export class Gateway {
         (this.pendingSessions.get(pendingId) as any).setupSecret = setup.secret;
         const qrDataUri = await QRCode.toDataURL(setup.otpauthUrl, { width: 250, margin: 2 });
         reply.header('Content-Type', 'text/html');
-        return reply.send(this.get2FASetupHTML(pendingId, setup.otpauthUrl, qrDataUri));
+        return reply.send(this.get2FASetupHTML(pendingId, setup.otpauthUrl, qrDataUri, undefined, csrfToken));
       }
 
       // 2FA already configured — show TOTP + PIN form
       reply.header('Content-Type', 'text/html');
-      return reply.send(this.getTOTPFormHTML(pendingId));
+      return reply.send(this.getTOTPFormHTML(pendingId, undefined, csrfToken));
     });
 
     // ─── First-time 2FA Setup: confirm TOTP code + Admin PIN + save secret ───
@@ -856,7 +883,7 @@ export class Gateway {
       }
       this.recordAuthAttempt(clientIp);
 
-      const body = request.body as { pendingId?: string; code?: string; pin?: string };
+      const body = request.body as { pendingId?: string; code?: string; pin?: string; _csrf?: string };
       if (!body.pendingId || !body.code) {
         reply.status(400).header('Content-Type', 'text/html');
         return reply.send(this.getAccessPageHTML('Missing pending session or code'));
@@ -869,15 +896,21 @@ export class Gateway {
         return reply.send(this.getAccessPageHTML('Session expired. Generate a new access token.'));
       }
 
+      // CSRF verification
+      if (!this.verifyCsrf(request, body.pendingId, body._csrf)) {
+        reply.status(403).header('Content-Type', 'text/html');
+        return reply.send(this.getAccessPageHTML('Invalid request. Please try again.'));
+      }
+
       const setupSecret = pending.setupSecret;
       if (!setupSecret) {
         reply.header('Content-Type', 'text/html');
         return reply.send(this.getAccessPageHTML('Invalid setup session'));
       }
 
-      // Verify Admin PIN (Vault custom PIN > env var fallback)
-      const adminPin = this.getAdminPin();
-      if (adminPin && body.pin?.trim() !== adminPin) {
+      // Verify Admin PIN (bcrypt hash from Vault, or plaintext env var fallback)
+      const pinValid = await this.verifyAdminPin(body.pin);
+      if (!pinValid) {
         this.auditLogger.log({
           action: 'auth.2fa_failed',
           ipAddress: request.ip,
@@ -888,7 +921,7 @@ export class Gateway {
         const otpauthUrl = `otpauth://totp/ForgeAI:admin?secret=${setupSecret}&issuer=ForgeAI`;
         const qrDataUri = await QRCode.toDataURL(otpauthUrl, { width: 250, margin: 2 });
         reply.header('Content-Type', 'text/html');
-        return reply.send(this.get2FASetupHTML(body.pendingId, otpauthUrl, qrDataUri, 'Invalid Admin PIN.'));
+        return reply.send(this.get2FASetupHTML(body.pendingId, otpauthUrl, qrDataUri, 'Invalid Admin PIN.', pending.csrfToken));
       }
 
       // Verify the TOTP code against the setup secret
@@ -904,7 +937,7 @@ export class Gateway {
         const otpauthUrl = `otpauth://totp/ForgeAI:admin?secret=${setupSecret}&issuer=ForgeAI`;
         const qrDataUri = await QRCode.toDataURL(otpauthUrl, { width: 250, margin: 2 });
         reply.header('Content-Type', 'text/html');
-        return reply.send(this.get2FASetupHTML(body.pendingId, otpauthUrl, qrDataUri, 'Invalid TOTP code. Try again.'));
+        return reply.send(this.get2FASetupHTML(body.pendingId, otpauthUrl, qrDataUri, 'Invalid TOTP code. Try again.', pending.csrfToken));
       }
 
       // Save 2FA secret to Vault permanently
@@ -957,7 +990,7 @@ export class Gateway {
       }
       this.recordAuthAttempt(clientIp);
 
-      const body = request.body as { pendingId?: string; code?: string; pin?: string };
+      const body = request.body as { pendingId?: string; code?: string; pin?: string; _csrf?: string };
       if (!body.pendingId || !body.code) {
         reply.status(400).header('Content-Type', 'text/html');
         return reply.send(this.getAccessPageHTML('Missing pending session or code'));
@@ -970,9 +1003,15 @@ export class Gateway {
         return reply.send(this.getAccessPageHTML('Session expired. Generate a new access token.'));
       }
 
-      // Verify Admin PIN (Vault custom PIN > env var fallback)
-      const adminPin = this.getAdminPin();
-      if (adminPin && body.pin?.trim() !== adminPin) {
+      // CSRF verification
+      if (!this.verifyCsrf(request, body.pendingId, body._csrf)) {
+        reply.status(403).header('Content-Type', 'text/html');
+        return reply.send(this.getAccessPageHTML('Invalid request. Please try again.'));
+      }
+
+      // Verify Admin PIN (bcrypt hash from Vault, or plaintext env var fallback)
+      const pinValid = await this.verifyAdminPin(body.pin);
+      if (!pinValid) {
         this.auditLogger.log({
           action: 'auth.2fa_failed',
           ipAddress: request.ip,
@@ -981,7 +1020,7 @@ export class Gateway {
           riskLevel: 'high',
         });
         reply.header('Content-Type', 'text/html');
-        return reply.send(this.getTOTPFormHTML(body.pendingId, 'Invalid Admin PIN.'));
+        return reply.send(this.getTOTPFormHTML(body.pendingId, 'Invalid Admin PIN.', pending.csrfToken));
       }
 
       // Get 2FA secret from Vault
@@ -1001,7 +1040,7 @@ export class Gateway {
           riskLevel: 'high',
         });
         reply.header('Content-Type', 'text/html');
-        return reply.send(this.getTOTPFormHTML(body.pendingId, 'Invalid TOTP code. Try again.'));
+        return reply.send(this.getTOTPFormHTML(body.pendingId, 'Invalid TOTP code. Try again.', pending.csrfToken));
       }
 
       this.auditLogger.log({
@@ -1021,12 +1060,12 @@ export class Gateway {
         const sent = await this.emailOTP.sendOTP(body.pendingId, adminEmail);
         if (!sent) {
           reply.header('Content-Type', 'text/html');
-          return reply.send(this.getTOTPFormHTML(body.pendingId, 'Failed to send email verification. Check SMTP config.'));
+          return reply.send(this.getTOTPFormHTML(body.pendingId, 'Failed to send email verification. Check SMTP config.', pending.csrfToken));
         }
 
         logger.info('Email OTP sent for external login', { ip: request.ip, email: this.emailOTP['maskEmail'] ? '***' : adminEmail });
         reply.header('Content-Type', 'text/html');
-        return reply.send(this.getEmailOTPFormHTML(body.pendingId));
+        return reply.send(this.getEmailOTPFormHTML(body.pendingId, undefined, pending.csrfToken));
       }
 
       // ─── Local access or no email config: check if PIN change needed, then issue JWT ───
@@ -1034,7 +1073,7 @@ export class Gateway {
         const pending = this.pendingSessions.get(body.pendingId)!;
         pending.totpVerified = true;
         reply.header('Content-Type', 'text/html');
-        return reply.send(this.getPinChangeHTML(body.pendingId));
+        return reply.send(this.getPinChangeHTML(body.pendingId, undefined, pending.csrfToken));
       }
 
       this.pendingSessions.delete(body.pendingId);
@@ -1058,7 +1097,7 @@ export class Gateway {
       }
       this.recordAuthAttempt(clientIp);
 
-      const body = request.body as { pendingId?: string; emailCode?: string };
+      const body = request.body as { pendingId?: string; emailCode?: string; _csrf?: string };
       if (!body.pendingId || !body.emailCode) {
         reply.status(400).header('Content-Type', 'text/html');
         return reply.send(this.getAccessPageHTML('Missing session or email code'));
@@ -1069,6 +1108,12 @@ export class Gateway {
         this.pendingSessions.delete(body.pendingId);
         reply.header('Content-Type', 'text/html');
         return reply.send(this.getAccessPageHTML('Session expired. Generate a new access token.'));
+      }
+
+      // CSRF verification
+      if (!this.verifyCsrf(request, body.pendingId, body._csrf)) {
+        reply.status(403).header('Content-Type', 'text/html');
+        return reply.send(this.getAccessPageHTML('Invalid request. Please try again.'));
       }
 
       // Ensure TOTP was already verified for this session
@@ -1088,7 +1133,7 @@ export class Gateway {
           riskLevel: 'high',
         });
         reply.header('Content-Type', 'text/html');
-        return reply.send(this.getEmailOTPFormHTML(body.pendingId, result.reason));
+        return reply.send(this.getEmailOTPFormHTML(body.pendingId, result.reason, pending.csrfToken));
       }
 
       this.auditLogger.log({
@@ -1102,7 +1147,7 @@ export class Gateway {
       // Check if PIN change is needed before issuing JWT
       if (this.isPinDefault()) {
         reply.header('Content-Type', 'text/html');
-        return reply.send(this.getPinChangeHTML(body.pendingId));
+        return reply.send(this.getPinChangeHTML(body.pendingId, undefined, pending.csrfToken));
       }
 
       this.pendingSessions.delete(body.pendingId);
@@ -1111,7 +1156,7 @@ export class Gateway {
 
     // ─── Force PIN Change (first login with default PIN) ───
     this.app.post('/auth/change-pin', async (request: FastifyRequest, reply: FastifyReply) => {
-      const body = request.body as { pendingId?: string; newPin?: string; confirmPin?: string };
+      const body = request.body as { pendingId?: string; newPin?: string; confirmPin?: string; _csrf?: string };
       if (!body.pendingId || !body.newPin || !body.confirmPin) {
         reply.status(400).header('Content-Type', 'text/html');
         return reply.send(this.getAccessPageHTML('Missing required fields'));
@@ -1122,6 +1167,12 @@ export class Gateway {
         this.pendingSessions.delete(body.pendingId);
         reply.header('Content-Type', 'text/html');
         return reply.send(this.getAccessPageHTML('Session expired. Generate a new access token.'));
+      }
+
+      // CSRF verification
+      if (!this.verifyCsrf(request, body.pendingId, body._csrf)) {
+        reply.status(403).header('Content-Type', 'text/html');
+        return reply.send(this.getAccessPageHTML('Invalid request. Please try again.'));
       }
 
       if (!pending.totpVerified) {
@@ -1135,25 +1186,26 @@ export class Gateway {
 
       if (newPin.length < 6) {
         reply.header('Content-Type', 'text/html');
-        return reply.send(this.getPinChangeHTML(body.pendingId, 'PIN must be at least 6 characters.'));
+        return reply.send(this.getPinChangeHTML(body.pendingId, 'PIN must be at least 6 characters.', pending.csrfToken));
       }
 
       if (newPin !== confirmPin) {
         reply.header('Content-Type', 'text/html');
-        return reply.send(this.getPinChangeHTML(body.pendingId, 'PINs do not match.'));
+        return reply.send(this.getPinChangeHTML(body.pendingId, 'PINs do not match.', pending.csrfToken));
       }
 
       // Don't allow keeping the same default PIN
       const defaultPin = process.env['FORGEAI_ADMIN_PIN'];
       if (defaultPin && newPin === defaultPin) {
         reply.header('Content-Type', 'text/html');
-        return reply.send(this.getPinChangeHTML(body.pendingId, 'New PIN cannot be the same as the default PIN.'));
+        return reply.send(this.getPinChangeHTML(body.pendingId, 'New PIN cannot be the same as the default PIN.', pending.csrfToken));
       }
 
-      // Store new PIN in Vault (encrypted)
+      // Store new PIN as bcrypt hash in Vault
       if (this.vault.isInitialized()) {
-        this.vault.set('system:admin_pin', newPin);
-        logger.info('Admin PIN changed and stored in Vault');
+        const pinHash = await this.auth.hashPassword(newPin);
+        this.vault.set('system:admin_pin', pinHash);
+        logger.info('Admin PIN changed and stored as bcrypt hash in Vault');
 
         this.auditLogger.log({
           action: 'auth.pin_changed',
@@ -1170,21 +1222,20 @@ export class Gateway {
 
     // ─── Generate Access Token (localhost/internal-only OR via Vault secret) ───
     this.app.post('/api/auth/generate-access', async (request: FastifyRequest, reply: FastifyReply) => {
-      // SECURITY: Use raw TCP socket IP — immune to X-Forwarded-For spoofing
-      const socketIp = request.socket.remoteAddress || '';
-      const rawIp = socketIp.replace('::ffff:', '');
-      const isLocalhost = rawIp === '127.0.0.1' || socketIp === '::1' || socketIp === 'localhost'
-        || rawIp.startsWith('172.') || rawIp.startsWith('10.') || rawIp.startsWith('192.168.');
+      // SECURITY: Detect true localhost vs proxied external request.
+      // Behind a reverse proxy (Caddy/nginx), socket.remoteAddress is always 127.0.0.1,
+      // so we MUST check proxy headers to distinguish local SSH calls from proxied external.
+      const isTrulyLocal = this.isTrueLocalRequest(request);
 
       // Check for master secret in header (for remote generation via SSH tunnel)
       const masterSecret = request.headers['x-forgeai-secret'] as string | undefined;
       const storedSecret = this.vault.isInitialized() ? this.vault.get('system:master_secret') : undefined;
       const hasValidSecret = masterSecret && storedSecret && masterSecret === storedSecret;
 
-      if (!isLocalhost && !hasValidSecret) {
+      if (!isTrulyLocal && !hasValidSecret) {
         this.auditLogger.log({
           action: 'auth.generate_denied',
-          ipAddress: socketIp,
+          ipAddress: request.socket.remoteAddress || '',
           details: { reason: 'Non-localhost request without valid secret' },
           success: false,
           riskLevel: 'high',
@@ -1193,20 +1244,20 @@ export class Gateway {
         return;
       }
 
+      this.auditLogger.log({
+        action: 'auth.access_token_generated',
+        ipAddress: request.socket.remoteAddress || '',
+        details: { trulyLocal: isTrulyLocal, hasSecret: !!hasValidSecret },
+        success: true,
+        riskLevel: 'medium',
+      });
+
       const { token, expiresAt, expiresInSeconds } = this.accessTokenManager.generate();
       const publicUrl = process.env['PUBLIC_URL'];
       const baseUrl = publicUrl
         ? publicUrl.replace(/\/$/, '')
         : `http://${this.host === '0.0.0.0' ? request.hostname : this.host}:${this.port}`;
       const accessUrl = `${baseUrl}/auth/access?token=${token}`;
-
-      this.auditLogger.log({
-        action: 'auth.access_token_generated',
-        ipAddress: socketIp,
-        details: { expiresAt: expiresAt.toISOString(), expiresInSeconds },
-        success: true,
-        riskLevel: 'medium',
-      });
 
       return {
         accessUrl,
@@ -1251,12 +1302,7 @@ export class Gateway {
 
     // ─── Revoke all tokens (emergency) ───
     this.app.post('/api/auth/revoke-all', async (request: FastifyRequest, reply: FastifyReply) => {
-      // SECURITY: Use raw TCP socket IP — immune to X-Forwarded-For spoofing
-      const socketIp = request.socket.remoteAddress || '';
-      const rIp = socketIp.replace('::ffff:', '');
-      const isLocalhost = rIp === '127.0.0.1' || socketIp === '::1' || socketIp === 'localhost'
-        || rIp.startsWith('172.') || rIp.startsWith('10.') || rIp.startsWith('192.168.');
-      if (!isLocalhost) {
+      if (!this.isTrueLocalRequest(request)) {
         reply.status(403).send({ error: 'Only available from localhost' });
         return;
       }
@@ -1264,7 +1310,7 @@ export class Gateway {
       const count = this.accessTokenManager.revokeAll();
       this.auditLogger.log({
         action: 'auth.revoke_all',
-        ipAddress: socketIp,
+        ipAddress: request.socket.remoteAddress || '',
         details: { revokedCount: count },
         riskLevel: 'critical',
       });
@@ -1281,6 +1327,7 @@ export class Gateway {
       username: 'admin',
       role: UserRole.ADMIN,
       sessionId: `access-${Date.now()}`,
+      ipAddress: ip,
     });
 
     reply.header('Set-Cookie',
@@ -1294,7 +1341,7 @@ export class Gateway {
   /**
    * TOTP verification form HTML (for subsequent logins).
    */
-  private getTOTPFormHTML(pendingId: string, error?: string): string {
+  private getTOTPFormHTML(pendingId: string, error?: string, csrfToken?: string): string {
     const errorBlock = error
       ? `<div class="error">${this.escapeHtml(error)}</div>`
       : '';
@@ -1326,6 +1373,7 @@ export class Gateway {
     ${errorBlock}
     <form method="POST" action="/auth/verify-totp">
       <input type="hidden" name="pendingId" value="${this.escapeHtml(pendingId)}">
+      <input type="hidden" name="_csrf" value="${this.escapeHtml(csrfToken || '')}">
       <input type="text" name="code" maxlength="6" pattern="[0-9]{6}" required autofocus placeholder="000000" autocomplete="one-time-code">
       <input type="password" name="pin" required placeholder="Admin PIN" style="background:#111;border:1px solid #333;border-radius:8px;padding:12px 16px;color:#fff;font-size:15px;text-align:center;outline:none;letter-spacing:2px;font-family:inherit;">
       <button type="submit">Verify</button>
@@ -1338,7 +1386,7 @@ export class Gateway {
   /**
    * Email OTP verification form HTML (for external access).
    */
-  private getEmailOTPFormHTML(pendingId: string, error?: string): string {
+  private getEmailOTPFormHTML(pendingId: string, error?: string, csrfToken?: string): string {
     const errorBlock = error
       ? `<div class="error">${this.escapeHtml(error)}</div>`
       : '';
@@ -1374,6 +1422,7 @@ export class Gateway {
     <div class="info">✅ TOTP + PIN verified · Email code required for external access</div>
     <form method="POST" action="/auth/verify-email">
       <input type="hidden" name="pendingId" value="${this.escapeHtml(pendingId)}">
+      <input type="hidden" name="_csrf" value="${this.escapeHtml(csrfToken || '')}">
       <input type="text" name="emailCode" maxlength="6" pattern="[0-9]{6}" required autofocus placeholder="000000" autocomplete="one-time-code">
       <button type="submit">Verify Email Code</button>
     </form>
@@ -1385,7 +1434,7 @@ export class Gateway {
   /**
    * PIN change form HTML (forced on first login with default PIN).
    */
-  private getPinChangeHTML(pendingId: string, error?: string): string {
+  private getPinChangeHTML(pendingId: string, error?: string, csrfToken?: string): string {
     const errorBlock = error
       ? `<div class="error">${this.escapeHtml(error)}</div>`
       : '';
@@ -1419,6 +1468,7 @@ export class Gateway {
     <div class="warning">⚠️ Using a default PIN is a security risk. Choose a strong, unique PIN that you'll remember.</div>
     <form method="POST" action="/auth/change-pin">
       <input type="hidden" name="pendingId" value="${this.escapeHtml(pendingId)}">
+      <input type="hidden" name="_csrf" value="${this.escapeHtml(csrfToken || '')}">
       <input type="password" name="newPin" required placeholder="New PIN (min 6 characters)" minlength="6">
       <input type="password" name="confirmPin" required placeholder="Confirm new PIN" minlength="6">
       <button type="submit">Set New PIN & Continue</button>
@@ -1431,7 +1481,7 @@ export class Gateway {
   /**
    * 2FA first-time setup HTML (QR code + confirmation).
    */
-  private get2FASetupHTML(pendingId: string, otpauthUrl: string, qrCodeUrl: string, error?: string): string {
+  private get2FASetupHTML(pendingId: string, otpauthUrl: string, qrCodeUrl: string, error?: string, csrfToken?: string): string {
     const errorBlock = error
       ? `<div class="error">${this.escapeHtml(error)}</div>`
       : '';
@@ -1489,6 +1539,7 @@ export class Gateway {
     <hr>
     <form method="POST" action="/auth/setup-2fa">
       <input type="hidden" name="pendingId" value="${this.escapeHtml(pendingId)}">
+      <input type="hidden" name="_csrf" value="${this.escapeHtml(csrfToken || '')}">
       <input type="text" name="code" maxlength="6" pattern="[0-9]{6}" required autofocus placeholder="000000" autocomplete="one-time-code">
       <input type="password" name="pin" required placeholder="Admin PIN" style="background:#111;border:1px solid #333;border-radius:8px;padding:12px 16px;color:#fff;font-size:15px;text-align:center;outline:none;letter-spacing:2px;font-family:inherit;">
       <button type="submit">Confirm & Activate 2FA</button>
@@ -1811,34 +1862,82 @@ document.getElementById('smtp-user').addEventListener('input', function() {
   }
 
   /**
+   * Check if a request is truly from localhost (not proxied from external).
+   * Behind a reverse proxy (Caddy/nginx), socket.remoteAddress is always 127.0.0.1.
+   * Proxy headers (X-Forwarded-For, X-Real-IP) indicate a proxied external request.
+   * A real local request (curl from SSH, browser on same machine) never sends these.
+   */
+  private isTrueLocalRequest(request: FastifyRequest): boolean {
+    const socketIp = request.socket.remoteAddress || '';
+    const rawIp = socketIp.replace('::ffff:', '');
+
+    // Check 1: socket-level IP must be loopback or private (Docker)
+    const isLoopback = Gateway.LOCALHOST_IPS.has(socketIp);
+    const isPrivate = /^10\./.test(rawIp)
+      || /^172\.(1[6-9]|2\d|3[01])\./.test(rawIp)  // RFC 1918: 172.16.0.0/12
+      || /^192\.168\./.test(rawIp);
+    if (!isLoopback && !isPrivate) return false;
+
+    // Check 2: if proxy headers exist, the request was forwarded by a reverse proxy
+    // from an external client — NOT a true local request
+    const forwarded = request.headers['x-forwarded-for']
+      || request.headers['x-real-ip']
+      || request.headers['forwarded'];
+    if (forwarded) return false;
+
+    return true;
+  }
+
+  /**
    * Check if a request comes from an external (non-localhost) IP.
    * Used to enforce email OTP for external access.
    */
   private isExternalRequest(request: FastifyRequest): boolean {
-    const socketIp = request.socket.remoteAddress || '';
-    if (!Gateway.LOCALHOST_IPS.has(socketIp)) return true;
-    // Docker internal IPs (172.x, 10.x) are treated as local (container-to-container)
-    const rawIp = socketIp.replace('::ffff:', '');
-    if (rawIp.startsWith('172.') || rawIp.startsWith('10.') || rawIp.startsWith('192.168.')) return false;
-    // Proxy headers mean external origin
-    const forwarded = request.headers['x-forwarded-for']
-      || request.headers['x-real-ip']
-      || request.headers['forwarded'];
-    if (forwarded) return true;
-    return false;
+    return !this.isTrueLocalRequest(request);
   }
 
   /**
-   * Get admin PIN — checks Vault (custom PIN) first, then env var fallback.
+   * Verify CSRF token from form submission against the pending session.
+   * Returns true if valid. Logs and returns false on mismatch.
    */
-  private getAdminPin(): string | null {
-    // Custom PIN stored in Vault takes priority (set during force-change)
-    if (this.vault.isInitialized()) {
-      const customPin = this.vault.get('system:admin_pin');
-      if (customPin) return customPin;
+  private verifyCsrf(request: FastifyRequest, pendingId: string, submittedToken: string | undefined): boolean {
+    const pending = this.pendingSessions.get(pendingId);
+    if (!pending?.csrfToken || !submittedToken || submittedToken !== pending.csrfToken) {
+      this.auditLogger.log({
+        action: 'auth.csrf_failed',
+        ipAddress: request.ip,
+        details: { pendingId },
+        success: false,
+        riskLevel: 'high',
+      });
+      return false;
     }
-    // Fallback to env var (default/initial PIN)
-    return process.env['FORGEAI_ADMIN_PIN'] || null;
+    return true;
+  }
+
+  /**
+   * Verify admin PIN — checks Vault bcrypt hash first, then env var plaintext fallback.
+   * Returns true if PIN matches. Returns true if no PIN is configured (skip check).
+   */
+  private async verifyAdminPin(inputPin: string | undefined): Promise<boolean> {
+    // Custom PIN stored in Vault (bcrypt hash) takes priority
+    if (this.vault.isInitialized()) {
+      const storedHash = this.vault.get('system:admin_pin');
+      if (storedHash) {
+        if (!inputPin) return false;
+        // If stored value looks like a bcrypt hash, use bcrypt.compare via JWTAuth
+        if (storedHash.startsWith('$2')) {
+          return this.auth.verifyPassword(inputPin.trim(), storedHash);
+        }
+        // Legacy plaintext comparison (will be replaced on next PIN change)
+        return inputPin.trim() === storedHash;
+      }
+    }
+    // Fallback to env var (plaintext default/initial PIN)
+    const envPin = process.env['FORGEAI_ADMIN_PIN'];
+    if (!envPin) return true; // No PIN configured — skip check
+    if (!inputPin) return false;
+    return inputPin.trim() === envPin;
   }
 
   /**
@@ -1928,7 +2027,11 @@ document.getElementById('smtp-user').addEventListener('input', function() {
           reply.status(proxyRes.status);
           const ct = proxyRes.headers.get('content-type');
           if (ct) reply.header('Content-Type', ct);
-          reply.header('Access-Control-Allow-Origin', '*');
+          const reqOrigin = request.headers.origin || '';
+          const publicUrl = process.env['PUBLIC_URL']?.replace(/\/$/, '') || '';
+          if (reqOrigin === publicUrl || reqOrigin.startsWith('http://localhost:') || reqOrigin.startsWith('http://127.0.0.1:')) {
+            reply.header('Access-Control-Allow-Origin', reqOrigin);
+          }
           const body = await proxyRes.text();
           reply.send(body);
         } catch {
@@ -1998,7 +2101,11 @@ document.getElementById('smtp-user').addEventListener('input', function() {
 
       reply.header('Content-Type', contentType);
       reply.header('Cache-Control', 'public, max-age=300');
-      reply.header('Access-Control-Allow-Origin', '*');
+      const reqOrigin = request.headers.origin || '';
+      const pubUrl = process.env['PUBLIC_URL']?.replace(/\/$/, '') || '';
+      if (reqOrigin === pubUrl || reqOrigin.startsWith('http://localhost:') || reqOrigin.startsWith('http://127.0.0.1:')) {
+        reply.header('Access-Control-Allow-Origin', reqOrigin);
+      }
       reply.send(createReadStream(filePath));
     });
 
@@ -2248,8 +2355,9 @@ document.getElementById('smtp-user').addEventListener('input', function() {
       this.vault.set('system:2fa_secret', pendingSetupSecret);
       pendingSetupSecret = null;
 
-      // Save custom PIN to Vault
-      this.vault.set('system:admin_pin', newPin);
+      // Save custom PIN as bcrypt hash to Vault
+      const pinHash = await this.auth.hashPassword(newPin);
+      this.vault.set('system:admin_pin', pinHash);
 
       logger.info('First-run setup completed — 2FA + PIN configured');
 
@@ -2275,6 +2383,7 @@ document.getElementById('smtp-user').addEventListener('input', function() {
         username: 'admin',
         role: UserRole.ADMIN,
         sessionId: `setup-${Date.now()}`,
+        ipAddress: request.ip,
       });
       reply.header('Set-Cookie', `forgeai_session=${tokenPair.accessToken}; Path=/; HttpOnly; SameSite=Strict; Max-Age=86400`);
 
