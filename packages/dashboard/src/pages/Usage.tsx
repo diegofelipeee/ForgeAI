@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { BarChart3, DollarSign, Zap, Clock, RefreshCw, Loader2, Wallet, CheckCircle2, XCircle, TrendingDown, MessageSquare, Send, Hash } from 'lucide-react';
+import { useI18n } from '@/lib/i18n';
 
 interface UsageSummary {
   totalRequests: number;
@@ -47,6 +48,7 @@ interface ProviderBalance {
 }
 
 export function UsagePage() {
+  const { t } = useI18n();
   const [summary, setSummary] = useState<UsageSummary | null>(null);
   const [records, setRecords] = useState<UsageRecord[]>([]);
   const [balances, setBalances] = useState<ProviderBalance[]>([]);
@@ -101,18 +103,18 @@ export function UsagePage() {
             <BarChart3 className="w-5 h-5 text-forge-400" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-white">Usage & Analytics</h1>
-            <p className="text-sm text-zinc-500">Token usage, costs, and provider balances</p>
+            <h1 className="text-2xl font-bold text-white">{t('usage.title')}</h1>
+            <p className="text-sm text-zinc-500">{t('usage.subtitle')}</p>
           </div>
         </div>
         <button onClick={() => { loadData(); loadBalances(); }} className="flex items-center gap-2 px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-sm transition-colors">
-          <RefreshCw className="w-3.5 h-3.5" /> Refresh
+          <RefreshCw className="w-3.5 h-3.5" /> {t('common.refresh')}
         </button>
       </div>
 
       {loading ? (
         <div className="flex items-center gap-2 text-zinc-400">
-          <Loader2 className="w-4 h-4 animate-spin" /> Loading usage data...
+          <Loader2 className="w-4 h-4 animate-spin" /> {t('common.loading')}
         </div>
       ) : (
         <>
@@ -120,26 +122,26 @@ export function UsagePage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
             <div className="bg-zinc-950/50 border border-zinc-800 rounded-xl p-5">
               <div className="flex items-center gap-2 text-zinc-500 text-xs font-medium mb-2">
-                <Zap className="w-3.5 h-3.5" /> REQUESTS
+                <Zap className="w-3.5 h-3.5" /> {t('usage.requests')}
               </div>
               <p className="text-2xl font-bold text-white">{summary?.totalRequests ?? 0}</p>
             </div>
             <div className="bg-zinc-950/50 border border-zinc-800 rounded-xl p-5">
               <div className="flex items-center gap-2 text-zinc-500 text-xs font-medium mb-2">
-                <BarChart3 className="w-3.5 h-3.5" /> TOKENS
+                <BarChart3 className="w-3.5 h-3.5" /> {t('usage.tokens')}
               </div>
               <p className="text-2xl font-bold text-white">{formatTokens(summary?.totalTokens ?? 0)}</p>
             </div>
             <div className="bg-zinc-950/50 border border-zinc-800 rounded-xl p-5">
               <div className="flex items-center gap-2 text-zinc-500 text-xs font-medium mb-2">
-                <TrendingDown className="w-3.5 h-3.5" /> CUSTO ESTIMADO
+                <TrendingDown className="w-3.5 h-3.5" /> {t('usage.estimatedCost')}
               </div>
               <p className="text-2xl font-bold text-amber-400">{formatCost(summary?.totalCost ?? 0)}</p>
-              <p className="text-[10px] text-zinc-600 mt-1">baseado na tabela de precos</p>
+              <p className="text-[10px] text-zinc-600 mt-1">{t('usage.basedOnPricing')}</p>
             </div>
             <div className="bg-zinc-950/50 border border-emerald-800/30 rounded-xl p-5">
               <div className="flex items-center gap-2 text-zinc-500 text-xs font-medium mb-2">
-                <Wallet className="w-3.5 h-3.5" /> SALDO TOTAL
+                <Wallet className="w-3.5 h-3.5" /> {t('usage.balance')}
               </div>
               {balanceLoading ? (
                 <Loader2 className="w-4 h-4 animate-spin text-zinc-500" />
@@ -148,11 +150,11 @@ export function UsagePage() {
               ) : (
                 <p className="text-lg font-bold text-zinc-600">--</p>
               )}
-              <p className="text-[10px] text-zinc-600 mt-1">{availableBalances.length} provider{availableBalances.length !== 1 ? 's' : ''} com saldo</p>
+              <p className="text-[10px] text-zinc-600 mt-1">{availableBalances.length} provider{availableBalances.length !== 1 ? 's' : ''} {t('usage.withBalance')}</p>
             </div>
             <div className="bg-zinc-950/50 border border-zinc-800 rounded-xl p-5">
               <div className="flex items-center gap-2 text-zinc-500 text-xs font-medium mb-2">
-                <Clock className="w-3.5 h-3.5" /> AVG TOKENS/REQ
+                <Clock className="w-3.5 h-3.5" /> {t('usage.avgTokensReq')}
               </div>
               <p className="text-2xl font-bold text-white">
                 {summary && summary.totalRequests > 0 ? formatTokens(Math.round(summary.totalTokens / summary.totalRequests)) : '0'}
@@ -165,10 +167,10 @@ export function UsagePage() {
             <div className="bg-zinc-950/50 border border-zinc-800 rounded-xl p-5 mb-8">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-sm font-semibold text-zinc-400 flex items-center gap-2">
-                  <Wallet className="w-4 h-4" /> Saldo dos Provedores
+                  <Wallet className="w-4 h-4" /> {t('usage.providerBalances')}
                 </h3>
                 <button onClick={loadBalances} disabled={balanceLoading} className="text-xs text-zinc-500 hover:text-zinc-300 flex items-center gap-1 transition-colors">
-                  {balanceLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />} atualizar
+                  {balanceLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />} {t('common.refresh')}
                 </button>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -187,13 +189,13 @@ export function UsagePage() {
                       <XCircle className="w-3.5 h-3.5 text-zinc-600" />
                       <span className="text-sm font-medium text-zinc-500">{b.displayName}</span>
                     </div>
-                    <span className="text-xs text-zinc-600">sem API de saldo</span>
+                    <span className="text-xs text-zinc-600">{t('usage.noBalanceApi')}</span>
                   </div>
                 ))}
               </div>
               {unavailableProviders.length > 0 && (
                 <p className="text-[10px] text-zinc-600 mt-3">
-                  Providers como OpenAI, Anthropic e Google nao disponibilizam API de consulta de saldo. Para esses, consulte o painel do provider.
+                  {t('usage.providerBalanceNote')}
                 </p>
               )}
             </div>
@@ -203,7 +205,7 @@ export function UsagePage() {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
             {/* By Provider */}
             <div className="bg-zinc-950/50 border border-zinc-800 rounded-xl p-5">
-              <h3 className="text-sm font-semibold text-zinc-400 mb-4">Consumo por Provider</h3>
+              <h3 className="text-sm font-semibold text-zinc-400 mb-4">{t('usage.byProvider')}</h3>
               {summary && Object.keys(summary.byProvider).length > 0 ? (
                 <div className="space-y-3">
                   {Object.entries(summary.byProvider).map(([provider, data]) => (
@@ -220,13 +222,13 @@ export function UsagePage() {
                   ))}
                 </div>
               ) : (
-                <p className="text-sm text-zinc-600">Nenhum dado de uso</p>
+                <p className="text-sm text-zinc-600">{t('usage.noData')}</p>
               )}
             </div>
 
             {/* By Model */}
             <div className="bg-zinc-950/50 border border-zinc-800 rounded-xl p-5">
-              <h3 className="text-sm font-semibold text-zinc-400 mb-4">Consumo por Modelo</h3>
+              <h3 className="text-sm font-semibold text-zinc-400 mb-4">{t('usage.byModel')}</h3>
               {summary && Object.keys(summary.byModel).length > 0 ? (
                 <div className="space-y-3">
                   {Object.entries(summary.byModel).map(([model, data]) => (
@@ -243,14 +245,14 @@ export function UsagePage() {
                   ))}
                 </div>
               ) : (
-                <p className="text-sm text-zinc-600">Nenhum dado de uso</p>
+                <p className="text-sm text-zinc-600">{t('usage.noData')}</p>
               )}
             </div>
 
             {/* By Channel */}
             <div className="bg-zinc-950/50 border border-zinc-800 rounded-xl p-5">
               <h3 className="text-sm font-semibold text-zinc-400 mb-4 flex items-center gap-2">
-                <Send className="w-4 h-4" /> Consumo por Canal
+                <Send className="w-4 h-4" /> {t('usage.byChannel')}
               </h3>
               {summary && Object.keys(summary.byChannel ?? {}).length > 0 ? (
                 <div className="space-y-3">
@@ -271,7 +273,7 @@ export function UsagePage() {
                   })}
                 </div>
               ) : (
-                <p className="text-sm text-zinc-600">Nenhum dado de uso</p>
+                <p className="text-sm text-zinc-600">{t('usage.noData')}</p>
               )}
             </div>
           </div>
@@ -279,19 +281,19 @@ export function UsagePage() {
           {/* Recent Records */}
           <div className="bg-zinc-950/50 border border-zinc-800 rounded-xl overflow-hidden">
             <div className="px-5 py-4 border-b border-zinc-800">
-              <h3 className="text-sm font-semibold text-zinc-400">Requisicoes Recentes</h3>
+              <h3 className="text-sm font-semibold text-zinc-400">{t('usage.recentRequests')}</h3>
             </div>
             {records.length > 0 ? (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-zinc-800 text-zinc-500 text-xs">
-                      <th className="px-4 py-3 text-left font-medium">Hora</th>
-                      <th className="px-4 py-3 text-left font-medium">Canal</th>
-                      <th className="px-4 py-3 text-left font-medium">Modelo</th>
+                      <th className="px-4 py-3 text-left font-medium">{t('usage.time')}</th>
+                      <th className="px-4 py-3 text-left font-medium">{t('usage.channel')}</th>
+                      <th className="px-4 py-3 text-left font-medium">{t('usage.model')}</th>
                       <th className="px-4 py-3 text-right font-medium">Tokens</th>
-                      <th className="px-4 py-3 text-right font-medium">Custo Est.</th>
-                      <th className="px-4 py-3 text-right font-medium">Latencia</th>
+                      <th className="px-4 py-3 text-right font-medium">{t('usage.estCost')}</th>
+                      <th className="px-4 py-3 text-right font-medium">{t('usage.latency')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -311,7 +313,7 @@ export function UsagePage() {
                 </table>
               </div>
             ) : (
-              <div className="px-5 py-8 text-center text-zinc-600 text-sm">Nenhum registro de uso. Envie uma mensagem para comecar o tracking.</div>
+              <div className="px-5 py-8 text-center text-zinc-600 text-sm">{t('usage.noRecords')}</div>
             )}
           </div>
         </>

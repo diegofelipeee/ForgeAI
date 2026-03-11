@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Save, Check, Loader2, FileText, Eye, EyeOff, RotateCcw, Brain, Heart, User, Bot, Clock } from 'lucide-react';
 import { api, type WorkspacePromptFile } from '@/lib/api';
+import { useI18n } from '@/lib/i18n';
 
 const FILE_ICONS: Record<string, React.ReactNode> = {
   'AGENTS.md': <Bot className="w-4 h-4" />,
@@ -10,17 +11,18 @@ const FILE_ICONS: Record<string, React.ReactNode> = {
   'AUTOPILOT.md': <Clock className="w-4 h-4" />,
 };
 
-const FILE_DESCRIPTIONS: Record<string, string> = {
-  'AGENTS.md': 'Define como o agente se comporta, regras de execução e abordagem para tarefas.',
-  'SOUL.md': 'Define a personalidade, tom de comunicação e estilo do agente.',
-  'IDENTITY.md': 'Define quem o agente é — nome, papel e contexto.',
-  'USER.md': 'Suas preferências pessoais — tech stack, projetos, informações sobre você.',
-  'AUTOPILOT.md': 'Tarefas automáticas agendadas — @startup, @hourly, @morning, @afternoon, @evening.',
+const FILE_DESC_KEYS: Record<string, string> = {
+  'AGENTS.md': 'workspace.descAgents',
+  'SOUL.md': 'workspace.descSoul',
+  'IDENTITY.md': 'workspace.descIdentity',
+  'USER.md': 'workspace.descUser',
+  'AUTOPILOT.md': 'workspace.descAutopilot',
 };
 
 const isAutopilotFile = (filename: string) => filename === 'AUTOPILOT.md';
 
 export function WorkspacePage() {
+  const { t } = useI18n();
   const [files, setFiles] = useState<WorkspacePromptFile[]>([]);
   const [activeFile, setActiveFile] = useState<string | null>(null);
   const [editContent, setEditContent] = useState('');
@@ -94,11 +96,10 @@ export function WorkspacePage() {
       <div>
         <h1 className="text-2xl font-bold text-white flex items-center gap-2">
           <Brain className="w-6 h-6 text-forge-400" />
-          Workspace Prompts
+          {t('workspace.title')}
         </h1>
         <p className="text-sm text-zinc-400 mt-1">
-          Personalize o comportamento, personalidade e identidade do agente editando os arquivos abaixo.
-          Arquivos customizados são injetados automaticamente no system prompt.
+          {t('workspace.subtitle')}
         </p>
       </div>
 
@@ -126,15 +127,15 @@ export function WorkspacePage() {
                 <div className="text-[10px] text-zinc-600">{file.label}</div>
               </div>
               {file.active && (
-                <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" title="Ativo no prompt" />
+                <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" title={t('workspace.activeInPrompt')} />
               )}
             </button>
           ))}
 
           <div className="mt-4 p-3 bg-zinc-900/50 rounded-lg border border-zinc-800 text-[11px] text-zinc-500 space-y-1">
-            <p><strong className="text-zinc-400">Como funciona:</strong></p>
-            <p>Edite qualquer arquivo e salve. Os prompts são injetados no system prompt automaticamente.</p>
-            <p>O AUTOPILOT.md define tarefas automáticas que o agente executa em horários configurados.</p>
+            <p><strong className="text-zinc-400">{t('workspace.howItWorks')}:</strong></p>
+            <p>{t('workspace.howItWorksDesc1')}</p>
+            <p>{t('workspace.howItWorksDesc2')}</p>
           </div>
         </div>
 
@@ -149,32 +150,32 @@ export function WorkspacePage() {
                     {activeFile}
                   </h2>
                   <p className="text-xs text-zinc-500 mt-0.5">
-                    {FILE_DESCRIPTIONS[activeFile] ?? activeFileData.label}
+                    {FILE_DESC_KEYS[activeFile] ? t(FILE_DESC_KEYS[activeFile]) : activeFileData.label}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
                   {activeFileData.active && isAutopilotFile(activeFile) && (
                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400">
-                      Autopilot rodando
+                      {t('workspace.autopilotRunning')}
                     </span>
                   )}
                   {activeFileData.active && !isAutopilotFile(activeFile) && (
                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400">
-                      Ativo no prompt
+                      {t('workspace.activeInPrompt')}
                     </span>
                   )}
                   {!activeFileData.active && isAutopilotFile(activeFile) && (
                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-700 text-zinc-500">
-                      Autopilot parado
+                      {t('workspace.autopilotStopped')}
                     </span>
                   )}
                   {!activeFileData.active && !isAutopilotFile(activeFile) && (
                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-700 text-zinc-500">
-                      Template padrão (não injetado)
+                      {t('workspace.defaultTemplate')}
                     </span>
                   )}
                   <button
-                    title={preview ? 'Editar' : 'Preview'}
+                    title={preview ? t('common.edit') : t('common.preview')}
                     onClick={() => setPreview(!preview)}
                     className="p-1.5 rounded text-zinc-500 hover:text-zinc-300 transition-colors"
                   >
@@ -191,7 +192,7 @@ export function WorkspacePage() {
                 <textarea
                   value={editContent}
                   onChange={e => { setEditContent(e.target.value); setSaved(false); }}
-                  placeholder="Edite o conteúdo aqui..."
+                  placeholder={t('workspace.editPlaceholder')}
                   className="w-full min-h-[400px] bg-zinc-900/50 border border-zinc-800 rounded-xl px-5 py-4 text-sm text-zinc-200 font-mono leading-relaxed placeholder:text-zinc-700 focus:outline-none focus:ring-2 focus:ring-forge-500/50 resize-y"
                   spellCheck={false}
                 />
@@ -199,10 +200,10 @@ export function WorkspacePage() {
 
               <div className="flex items-center justify-between">
                 <div className="text-[11px] text-zinc-600">
-                  {editContent.length} caracteres
+                  {editContent.length} {t('workspace.characters')}
                   {editContent.length > 4000 && (
                     <span className="text-amber-400 ml-2">
-                      ⚠ Será truncado para 4000 chars no prompt
+                      ⚠ {t('workspace.willBeTruncated')}
                     </span>
                   )}
                 </div>
@@ -210,11 +211,11 @@ export function WorkspacePage() {
                   {hasChanges && (
                     <button
                       onClick={handleReset}
-                      title="Desfazer alterações"
+                      title={t('workspace.undoChanges')}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-zinc-400 hover:text-zinc-200 text-xs transition-colors"
                     >
                       <RotateCcw className="w-3.5 h-3.5" />
-                      Desfazer
+                      {t('common.undo')}
                     </button>
                   )}
                   <button
@@ -231,7 +232,7 @@ export function WorkspacePage() {
                     }`}
                   >
                     {saved ? <Check className="w-4 h-4" /> : saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                    {saved ? 'Salvo!' : 'Salvar'}
+                    {saved ? t('common.success') : t('common.save')}
                   </button>
                 </div>
               </div>

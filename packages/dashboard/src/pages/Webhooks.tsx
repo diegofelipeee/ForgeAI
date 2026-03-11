@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Webhook, Plus, Loader2, ArrowUpRight, ArrowDownLeft, Clock, CheckCircle, XCircle } from 'lucide-react';
+import { useI18n } from '@/lib/i18n';
 
 interface OutboundWebhook {
   id: string;
@@ -32,6 +33,7 @@ interface WebhookEvent {
 type WebhookTab = 'outbound' | 'inbound' | 'events';
 
 export function WebhooksPage() {
+  const { t } = useI18n();
   const [tab, setTab] = useState<WebhookTab>('outbound');
   const [outbound, setOutbound] = useState<OutboundWebhook[]>([]);
   const [inbound, setInbound] = useState<InboundWebhook[]>([]);
@@ -94,27 +96,27 @@ export function WebhooksPage() {
         <div>
           <h1 className="text-2xl font-bold text-white flex items-center gap-2">
             <Webhook className="w-6 h-6 text-cyan-400" />
-            Webhooks
+            {t('webhooks.title')}
           </h1>
           <p className="text-sm text-zinc-400 mt-1">
-            {outbound.length} outbound, {inbound.length} inbound
+            {outbound.length} {t('webhooks.outbound')}, {inbound.length} {t('webhooks.inbound')}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {(['outbound', 'inbound', 'events'] as WebhookTab[]).map(t => (
+          {(['outbound', 'inbound', 'events'] as WebhookTab[]).map(wt => (
             <button
-              key={t}
-              onClick={() => { setTab(t); setShowAdd(false); }}
+              key={wt}
+              onClick={() => { setTab(wt); setShowAdd(false); }}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                tab === t
+                tab === wt
                   ? 'bg-forge-500/20 text-forge-400 border border-forge-500/30'
                   : 'bg-zinc-800/50 text-zinc-400 hover:text-zinc-200 border border-transparent'
               }`}
             >
-              {t === 'outbound' && <ArrowUpRight className="w-3.5 h-3.5" />}
-              {t === 'inbound' && <ArrowDownLeft className="w-3.5 h-3.5" />}
-              {t === 'events' && <Clock className="w-3.5 h-3.5" />}
-              {t === 'outbound' ? `Outbound (${outbound.length})` : t === 'inbound' ? `Inbound (${inbound.length})` : `Events (${events.length})`}
+              {wt === 'outbound' && <ArrowUpRight className="w-3.5 h-3.5" />}
+              {wt === 'inbound' && <ArrowDownLeft className="w-3.5 h-3.5" />}
+              {wt === 'events' && <Clock className="w-3.5 h-3.5" />}
+              {wt === 'outbound' ? `${t('webhooks.outbound')} (${outbound.length})` : wt === 'inbound' ? `${t('webhooks.inbound')} (${inbound.length})` : `${t('webhooks.events')} (${events.length})`}
             </button>
           ))}
         </div>
@@ -125,7 +127,7 @@ export function WebhooksPage() {
         <div className="space-y-3">
           <button onClick={() => setShowAdd(!showAdd)}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-forge-500 hover:bg-forge-600 text-white transition-colors">
-            <Plus className="w-3.5 h-3.5" /> Novo Outbound
+            <Plus className="w-3.5 h-3.5" /> {t('webhooks.addWebhook')}
           </button>
 
           {showAdd && (
@@ -140,7 +142,7 @@ export function WebhooksPage() {
               </div>
               <button onClick={addOutbound} disabled={!newOutbound.name || !newOutbound.url}
                 className="px-3 py-1.5 rounded-lg text-xs font-medium bg-forge-500 hover:bg-forge-600 text-white disabled:opacity-50 transition-colors">
-                Criar
+                {t('common.create')}
               </button>
             </div>
           )}
@@ -148,7 +150,7 @@ export function WebhooksPage() {
           {outbound.length === 0 ? (
             <div className="text-center py-12 text-zinc-500">
               <ArrowUpRight className="w-8 h-8 mx-auto mb-2 opacity-20" />
-              <p className="text-sm">Nenhum webhook outbound</p>
+              <p className="text-sm">{t('webhooks.noWebhooks')}</p>
             </div>
           ) : (
             outbound.map(wh => (
@@ -178,7 +180,7 @@ export function WebhooksPage() {
         <div className="space-y-3">
           <button onClick={() => setShowAdd(!showAdd)}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-forge-500 hover:bg-forge-600 text-white transition-colors">
-            <Plus className="w-3.5 h-3.5" /> Novo Inbound
+            <Plus className="w-3.5 h-3.5" /> {t('webhooks.addWebhook')}
           </button>
 
           {showAdd && (
@@ -201,7 +203,7 @@ export function WebhooksPage() {
           {inbound.length === 0 ? (
             <div className="text-center py-12 text-zinc-500">
               <ArrowDownLeft className="w-8 h-8 mx-auto mb-2 opacity-20" />
-              <p className="text-sm">Nenhum webhook inbound</p>
+              <p className="text-sm">{t('webhooks.noWebhooks')}</p>
             </div>
           ) : (
             inbound.map(wh => (
@@ -225,7 +227,7 @@ export function WebhooksPage() {
           {events.length === 0 ? (
             <div className="text-center py-12 text-zinc-500">
               <Clock className="w-8 h-8 mx-auto mb-2 opacity-20" />
-              <p className="text-sm">Nenhum evento registrado</p>
+              <p className="text-sm">{t('webhooks.noEvents')}</p>
             </div>
           ) : (
             events.map(ev => (

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Database, Search, Upload, Trash2, Loader2, Settings2, FileText, BarChart3, RefreshCw, Save, Zap } from 'lucide-react';
+import { useI18n } from '@/lib/i18n';
 
 interface RAGDocument {
   id: string;
@@ -33,6 +34,7 @@ interface SearchResult {
 }
 
 export function RAGPage() {
+  const { t } = useI18n();
   const [stats, setStats] = useState<RAGStats>({ documents: 0, chunks: 0, vocabSize: 0, avgChunkSize: 0 });
   const [config, setConfig] = useState<RAGConfig | null>(null);
   const [documents, setDocuments] = useState<RAGDocument[]>([]);
@@ -144,7 +146,7 @@ export function RAGPage() {
   if (loading) {
     return (
       <div className="p-8 flex items-center gap-2 text-zinc-400">
-        <Loader2 className="w-5 h-5 animate-spin" /> Loading RAG Engine...
+        <Loader2 className="w-5 h-5 animate-spin" /> {t('rag.loading')}
       </div>
     );
   }
@@ -156,11 +158,11 @@ export function RAGPage() {
         <div className="flex items-center gap-3">
           <Database className="w-7 h-7 text-purple-400" />
           <div>
-            <h1 className="text-2xl font-bold text-white">RAG Engine</h1>
-            <p className="text-sm text-zinc-400">Retrieval-Augmented Generation — knowledge base for your agents</p>
+            <h1 className="text-2xl font-bold text-white">{t('rag.title')}</h1>
+            <p className="text-sm text-zinc-400">{t('rag.subtitle')}</p>
           </div>
         </div>
-        <button onClick={loadData} title="Refresh" className="p-2 text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-800 transition">
+        <button onClick={loadData} title={t('common.refresh')} className="p-2 text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-800 transition">
           <RefreshCw className="w-5 h-5" />
         </button>
       </div>
@@ -168,10 +170,10 @@ export function RAGPage() {
       {/* Stats Cards */}
       <div className="grid grid-cols-4 gap-4">
         {[
-          { label: 'Documents', value: stats.documents, icon: FileText, color: 'text-blue-400' },
-          { label: 'Chunks', value: stats.chunks, icon: Database, color: 'text-purple-400' },
-          { label: 'Vocabulary', value: stats.vocabSize.toLocaleString(), icon: BarChart3, color: 'text-green-400' },
-          { label: 'Avg Chunk', value: `${stats.avgChunkSize} chars`, icon: Zap, color: 'text-amber-400' },
+          { label: t('rag.documents'), value: stats.documents, icon: FileText, color: 'text-blue-400' },
+          { label: t('rag.chunks'), value: stats.chunks, icon: Database, color: 'text-purple-400' },
+          { label: t('rag.vocabSize'), value: stats.vocabSize.toLocaleString(), icon: BarChart3, color: 'text-green-400' },
+          { label: t('rag.avgChunkSize'), value: `${stats.avgChunkSize} ${t('rag.chars')}`, icon: Zap, color: 'text-amber-400' },
         ].map(s => (
           <div key={s.label} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
             <div className="flex items-center gap-2 mb-1">
@@ -185,15 +187,15 @@ export function RAGPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 bg-zinc-900 rounded-lg p-1 border border-zinc-800">
-        {(['docs', 'search', 'ingest', 'config'] as const).map(t => (
+        {(['docs', 'search', 'ingest', 'config'] as const).map(rt => (
           <button
-            key={t}
-            onClick={() => setTab(t)}
+            key={rt}
+            onClick={() => setTab(rt)}
             className={`flex-1 px-4 py-2 rounded-md text-sm font-medium transition ${
-              tab === t ? 'bg-zinc-700 text-white' : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
+              tab === rt ? 'bg-zinc-700 text-white' : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
             }`}
           >
-            {t === 'docs' ? 'Documents' : t === 'search' ? 'Search' : t === 'ingest' ? 'Upload / Ingest' : 'Settings'}
+            {rt === 'docs' ? t('rag.documents') : rt === 'search' ? t('rag.search') : rt === 'ingest' ? t('rag.ingest') : t('rag.config')}
           </button>
         ))}
       </div>
@@ -204,8 +206,8 @@ export function RAGPage() {
           {documents.length === 0 ? (
             <div className="text-center py-12 text-zinc-500">
               <Database className="w-12 h-12 mx-auto mb-3 opacity-30" />
-              <p>No documents ingested yet.</p>
-              <p className="text-sm mt-1">Upload files or paste text in the "Upload / Ingest" tab.</p>
+              <p>{t('rag.noDocuments')}</p>
+              <p className="text-sm mt-1">{t('rag.noDocumentsHint')}</p>
             </div>
           ) : (
             documents.map(doc => (
@@ -222,7 +224,7 @@ export function RAGPage() {
                     <span>{new Date(doc.createdAt).toLocaleString()}</span>
                   </div>
                 </div>
-                <button onClick={() => handleDelete(doc.id)} title="Delete document" className="p-2 text-zinc-500 hover:text-red-400 transition">
+                <button onClick={() => handleDelete(doc.id)} title={t('common.delete')} className="p-2 text-zinc-500 hover:text-red-400 transition">
                   <Trash2 className="w-4 h-4" />
                 </button>
               </div>
@@ -242,7 +244,7 @@ export function RAGPage() {
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleSearch()}
-                placeholder="Search your knowledge base..."
+                placeholder={t('rag.searchPlaceholder')}
                 className="w-full pl-10 pr-4 py-2.5 bg-zinc-900 border border-zinc-700 rounded-lg text-white placeholder-zinc-500 focus:outline-none focus:border-purple-500"
               />
             </div>
@@ -252,7 +254,7 @@ export function RAGPage() {
               className="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white rounded-lg font-medium transition flex items-center gap-2"
             >
               {searching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-              Search
+              {t('common.search')}
             </button>
           </div>
 
@@ -273,7 +275,7 @@ export function RAGPage() {
           )}
 
           {searchResults.length === 0 && searchQuery && !searching && (
-            <p className="text-center text-zinc-500 py-8">No results found. Try a different query.</p>
+            <p className="text-center text-zinc-500 py-8">{t('rag.noResults')}</p>
           )}
         </div>
       )}
@@ -284,10 +286,10 @@ export function RAGPage() {
           {/* File Upload */}
           <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
             <h3 className="text-lg font-semibold text-white mb-3 flex items-center gap-2">
-              <Upload className="w-5 h-5 text-purple-400" /> Upload File
+              <Upload className="w-5 h-5 text-purple-400" /> {t('rag.uploadFile')}
             </h3>
             <p className="text-sm text-zinc-400 mb-4">
-              Supports: TXT, MD, CSV, JSON, XML, YAML, HTML, PDF, and source code files (JS, TS, PY, etc.)
+              {t('rag.uploadSupport')}
             </p>
             <div className="flex items-center gap-3">
               <input
@@ -306,31 +308,31 @@ export function RAGPage() {
           {/* Text Ingest */}
           <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6">
             <h3 className="text-lg font-semibold text-white mb-3 flex items-center gap-2">
-              <FileText className="w-5 h-5 text-blue-400" /> Paste Text
+              <FileText className="w-5 h-5 text-blue-400" /> {t('rag.ingestText')}
             </h3>
             <input
               type="text"
               value={ingestId}
               onChange={e => setIngestId(e.target.value)}
-              placeholder="Document ID (optional, auto-generated)"
+              placeholder={t('rag.documentId')}
               className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white placeholder-zinc-500 focus:outline-none focus:border-blue-500 mb-3 text-sm"
             />
             <textarea
               value={ingestText}
               onChange={e => setIngestText(e.target.value)}
-              placeholder="Paste your text content here..."
+              placeholder={t('rag.pastePlaceholder')}
               rows={8}
               className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white placeholder-zinc-500 focus:outline-none focus:border-blue-500 resize-y text-sm font-mono"
             />
             <div className="flex justify-between items-center mt-3">
-              <span className="text-xs text-zinc-500">{ingestText.length.toLocaleString()} characters</span>
+              <span className="text-xs text-zinc-500">{ingestText.length.toLocaleString()} {t('rag.characters')}</span>
               <button
                 onClick={handleIngestText}
                 disabled={ingesting || !ingestText.trim()}
                 className="px-5 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg font-medium transition flex items-center gap-2"
               >
                 {ingesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Database className="w-4 h-4" />}
-                Ingest
+                {t('rag.ingest')}
               </button>
             </div>
           </div>
@@ -342,19 +344,19 @@ export function RAGPage() {
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 space-y-5">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-              <Settings2 className="w-5 h-5 text-zinc-400" /> RAG Configuration
+              <Settings2 className="w-5 h-5 text-zinc-400" /> {t('rag.saveConfig')}
             </h3>
             {!editConfig ? (
               <button onClick={() => { setEditConfig(true); setConfigDraft({ ...config }); }} className="px-3 py-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg transition">
-                Edit
+                {t('common.edit')}
               </button>
             ) : (
               <div className="flex gap-2">
                 <button onClick={() => setEditConfig(false)} className="px-3 py-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition">
-                  Cancel
+                  {t('common.cancel')}
                 </button>
                 <button onClick={handleSaveConfig} disabled={savingConfig} className="px-3 py-1.5 text-sm bg-purple-600 hover:bg-purple-500 text-white rounded-lg transition flex items-center gap-1">
-                  {savingConfig ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />} Save
+                  {savingConfig ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />} {t('common.save')}
                 </button>
               </div>
             )}
@@ -363,31 +365,31 @@ export function RAGPage() {
           <div className="grid grid-cols-2 gap-4">
             {/* Embedding Provider */}
             <div>
-              <label htmlFor="rag-embedding-provider" className="text-xs text-zinc-500 uppercase tracking-wide">Embedding Provider</label>
+              <label htmlFor="rag-embedding-provider" className="text-xs text-zinc-500 uppercase tracking-wide">{t('rag.embeddingProvider')}</label>
               {editConfig ? (
                 <select
                   id="rag-embedding-provider"
-                  title="Embedding Provider"
+                  title={t('rag.embeddingProvider')}
                   value={configDraft.embeddingProvider ?? config.embeddingProvider}
                   onChange={e => setConfigDraft(p => ({ ...p, embeddingProvider: e.target.value as 'tfidf' | 'openai' }))}
                   className="w-full mt-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white text-sm"
                 >
-                  <option value="tfidf">TF-IDF (local, no API key needed)</option>
-                  <option value="openai">OpenAI Embeddings (requires API key)</option>
+                  <option value="tfidf">{t('rag.embeddingProviderTfidf')}</option>
+                  <option value="openai">{t('rag.embeddingProviderOpenai')}</option>
                 </select>
               ) : (
-                <p className="text-white mt-1 font-medium">{config.embeddingProvider === 'openai' ? 'OpenAI Embeddings' : 'TF-IDF (local)'}</p>
+                <p className="text-white mt-1 font-medium">{config.embeddingProvider === 'openai' ? t('rag.embeddingProviderOpenaiLabel') : t('rag.embeddingProviderTfidfLabel')}</p>
               )}
             </div>
 
             {/* Embedding Model */}
             <div>
-              <label htmlFor="rag-embedding-model" className="text-xs text-zinc-500 uppercase tracking-wide">Embedding Model</label>
+              <label htmlFor="rag-embedding-model" className="text-xs text-zinc-500 uppercase tracking-wide">{t('rag.embeddingModel')}</label>
               {editConfig ? (
                 <input
                   id="rag-embedding-model"
                   type="text"
-                  title="Embedding Model"
+                  title={t('rag.embeddingModel')}
                   value={configDraft.embeddingModel ?? config.embeddingModel}
                   onChange={e => setConfigDraft(p => ({ ...p, embeddingModel: e.target.value }))}
                   className="w-full mt-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white text-sm"
@@ -399,12 +401,12 @@ export function RAGPage() {
 
             {/* Chunk Size */}
             <div>
-              <label htmlFor="rag-chunk-size" className="text-xs text-zinc-500 uppercase tracking-wide">Chunk Size (words)</label>
+              <label htmlFor="rag-chunk-size" className="text-xs text-zinc-500 uppercase tracking-wide">{t('rag.chunkSize')}</label>
               {editConfig ? (
                 <input
                   id="rag-chunk-size"
                   type="number"
-                  title="Chunk Size"
+                  title={t('rag.chunkSize')}
                   value={configDraft.chunkSize ?? config.chunkSize}
                   onChange={e => setConfigDraft(p => ({ ...p, chunkSize: Number(e.target.value) }))}
                   className="w-full mt-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white text-sm"
@@ -416,12 +418,12 @@ export function RAGPage() {
 
             {/* Chunk Overlap */}
             <div>
-              <label htmlFor="rag-chunk-overlap" className="text-xs text-zinc-500 uppercase tracking-wide">Chunk Overlap (words)</label>
+              <label htmlFor="rag-chunk-overlap" className="text-xs text-zinc-500 uppercase tracking-wide">{t('rag.chunkOverlap')}</label>
               {editConfig ? (
                 <input
                   id="rag-chunk-overlap"
                   type="number"
-                  title="Chunk Overlap"
+                  title={t('rag.chunkOverlap')}
                   value={configDraft.chunkOverlap ?? config.chunkOverlap}
                   onChange={e => setConfigDraft(p => ({ ...p, chunkOverlap: Number(e.target.value) }))}
                   className="w-full mt-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white text-sm"
@@ -433,12 +435,12 @@ export function RAGPage() {
 
             {/* Max Results */}
             <div>
-              <label htmlFor="rag-max-results" className="text-xs text-zinc-500 uppercase tracking-wide">Max Results</label>
+              <label htmlFor="rag-max-results" className="text-xs text-zinc-500 uppercase tracking-wide">{t('rag.maxResults')}</label>
               {editConfig ? (
                 <input
                   id="rag-max-results"
                   type="number"
-                  title="Max Results"
+                  title={t('rag.maxResults')}
                   value={configDraft.maxResults ?? config.maxResults}
                   onChange={e => setConfigDraft(p => ({ ...p, maxResults: Number(e.target.value) }))}
                   className="w-full mt-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white text-sm"
@@ -450,12 +452,12 @@ export function RAGPage() {
 
             {/* Similarity Threshold */}
             <div>
-              <label htmlFor="rag-similarity-threshold" className="text-xs text-zinc-500 uppercase tracking-wide">Similarity Threshold</label>
+              <label htmlFor="rag-similarity-threshold" className="text-xs text-zinc-500 uppercase tracking-wide">{t('rag.similarityThreshold')}</label>
               {editConfig ? (
                 <input
                   id="rag-similarity-threshold"
                   type="number"
-                  title="Similarity Threshold"
+                  title={t('rag.similarityThreshold')}
                   step="0.01"
                   min="0"
                   max="1"
@@ -470,7 +472,7 @@ export function RAGPage() {
 
             {/* Persist */}
             <div className="col-span-2">
-              <label className="text-xs text-zinc-500 uppercase tracking-wide">Persistence</label>
+              <label className="text-xs text-zinc-500 uppercase tracking-wide">{t('rag.persistence')}</label>
               {editConfig ? (
                 <label className="flex items-center gap-2 mt-2 cursor-pointer">
                   <input
@@ -479,10 +481,10 @@ export function RAGPage() {
                     onChange={e => setConfigDraft(p => ({ ...p, persist: e.target.checked }))}
                     className="rounded border-zinc-600"
                   />
-                  <span className="text-sm text-white">Save documents to disk (survive restarts)</span>
+                  <span className="text-sm text-white">{t('rag.persistHelp')}</span>
                 </label>
               ) : (
-                <p className="text-white mt-1 font-medium">{config.persist ? 'Enabled (documents saved to disk)' : 'Disabled (in-memory only)'}</p>
+                <p className="text-white mt-1 font-medium">{config.persist ? t('rag.persistEnabled') : t('rag.persistDisabled')}</p>
               )}
             </div>
           </div>

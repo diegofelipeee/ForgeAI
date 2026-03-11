@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Key, Plus, Trash2, Loader2, Copy, Check, ShieldAlert, Clock } from 'lucide-react';
+import { useI18n } from '@/lib/i18n';
 
 interface ApiKeyInfo {
   id: string;
@@ -14,6 +15,7 @@ interface ApiKeyInfo {
 }
 
 export function ApiKeysPage() {
+  const { t } = useI18n();
   const [keys, setKeys] = useState<ApiKeyInfo[]>([]);
   const [scopes, setScopes] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -92,17 +94,17 @@ export function ApiKeysPage() {
         <div>
           <h1 className="text-2xl font-bold text-white flex items-center gap-2">
             <Key className="w-6 h-6 text-amber-400" />
-            API Keys
+            {t('apiKeys.title')}
           </h1>
           <p className="text-sm text-zinc-400 mt-1">
-            Gerencie chaves de API para acesso externo ao ForgeAI Gateway.
+            {t('apiKeys.subtitle')}
           </p>
         </div>
         <button
           onClick={() => { setShowCreate(!showCreate); setCreatedKey(null); }}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-forge-500 hover:bg-forge-600 text-white transition-colors"
         >
-          <Plus className="w-3.5 h-3.5" /> Nova Key
+          <Plus className="w-3.5 h-3.5" /> {t('apiKeys.newKey')}
         </button>
       </div>
 
@@ -111,7 +113,7 @@ export function ApiKeysPage() {
         <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 space-y-2">
           <p className="text-sm text-amber-400 font-semibold flex items-center gap-2">
             <ShieldAlert className="w-4 h-4" />
-            Copie a key agora! Ela não será mostrada novamente.
+            {t('apiKeys.copyNow')}
           </p>
           <div className="flex items-center gap-2">
             <code className="flex-1 bg-zinc-900 rounded px-3 py-2 text-sm text-white font-mono break-all">{createdKey}</code>
@@ -127,18 +129,18 @@ export function ApiKeysPage() {
         <div className="bg-zinc-950/50 border border-zinc-800 rounded-xl p-5 space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="text-xs text-zinc-500 mb-1 block">Nome da Key</label>
+              <label className="text-xs text-zinc-500 mb-1 block">{t('apiKeys.keyName')}</label>
               <input
                 type="text" value={newKeyName} onChange={e => setNewKeyName(e.target.value)}
-                placeholder="ex: meu-app, CI/CD, teste"
+                placeholder={t('apiKeys.keyNamePlaceholder')}
                 className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-forge-500/50"
               />
             </div>
             <div>
-              <label className="text-xs text-zinc-500 mb-1 block">Expiração (dias)</label>
+              <label className="text-xs text-zinc-500 mb-1 block">{t('apiKeys.expiration')}</label>
               <input
                 type="number" value={newKeyExpiry} onChange={e => setNewKeyExpiry(e.target.value)}
-                title="Dias até expiração"
+                title={t('apiKeys.expirationDays')}
                 className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:ring-2 focus:ring-forge-500/50"
               />
             </div>
@@ -146,7 +148,7 @@ export function ApiKeysPage() {
 
           {scopes.length > 0 && (
             <div>
-              <label className="text-xs text-zinc-500 mb-2 block">Scopes (vazio = todos)</label>
+              <label className="text-xs text-zinc-500 mb-2 block">{t('apiKeys.scopes')}</label>
               <div className="flex flex-wrap gap-2">
                 {scopes.map(scope => (
                   <button
@@ -169,7 +171,7 @@ export function ApiKeysPage() {
             onClick={createKey} disabled={!newKeyName.trim()}
             className="px-4 py-2 rounded-lg text-sm font-medium bg-forge-500 hover:bg-forge-600 text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            Criar Key
+            {t('apiKeys.createKey')}
           </button>
         </div>
       )}
@@ -179,7 +181,7 @@ export function ApiKeysPage() {
         {keys.length === 0 ? (
           <div className="text-center py-12 text-zinc-500">
             <Key className="w-8 h-8 mx-auto mb-2 opacity-20" />
-            <p className="text-sm">Nenhuma API key criada</p>
+            <p className="text-sm">{t('apiKeys.noKeys')}</p>
           </div>
         ) : (
           keys.map(k => (
@@ -192,22 +194,22 @@ export function ApiKeysPage() {
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium text-white">{k.name}</span>
                     <code className="text-[10px] text-zinc-600 font-mono">{k.prefix}...</code>
-                    {k.revoked && <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400">Revogada</span>}
+                    {k.revoked && <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400">{t('apiKeys.revoked')}</span>}
                   </div>
                   <div className="flex items-center gap-3 mt-0.5 text-[10px] text-zinc-600">
                     <span>{k.scopes.length > 0 ? k.scopes.join(', ') : 'all scopes'}</span>
                     <span className="flex items-center gap-1"><Clock className="w-2.5 h-2.5" /> {new Date(k.createdAt).toLocaleDateString()}</span>
-                    <span>{k.usageCount} usos</span>
+                    <span>{k.usageCount} {t('apiKeys.uses')}</span>
                   </div>
                 </div>
               </div>
               {!k.revoked && (
                 <div className="flex items-center gap-1 shrink-0">
-                  <button onClick={() => revokeKey(k.id)} title="Revogar key"
+                  <button onClick={() => revokeKey(k.id)} title={t('apiKeys.revokeKey')}
                     className="px-2 py-1 rounded text-xs text-zinc-500 hover:text-amber-400 transition-colors">
-                    Revogar
+                    {t('common.revoke')}
                   </button>
-                  <button onClick={() => deleteKey(k.id)} title="Deletar key"
+                  <button onClick={() => deleteKey(k.id)} title={t('apiKeys.deleteKey')}
                     className="p-1 rounded text-zinc-600 hover:text-red-400 transition-colors">
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>

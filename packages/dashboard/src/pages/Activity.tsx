@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Activity, Shield, AlertTriangle, Monitor, Server, Laptop, RefreshCw, Filter } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useI18n } from '@/lib/i18n';
 
 interface ActivityEntry {
   id: number;
@@ -54,6 +55,7 @@ function timeAgo(dateStr: string): string {
 }
 
 export function ActivityPage() {
+  const { t } = useI18n();
   const [activities, setActivities] = useState<ActivityEntry[]>([]);
   const [stats, setStats] = useState<ActivityStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -91,9 +93,9 @@ export function ActivityPage() {
         <div>
           <h1 className="text-2xl font-bold text-white flex items-center gap-2">
             <Activity className="w-6 h-6 text-forge-400" />
-            Activity Monitor
+            {t('activity.title')}
           </h1>
-          <p className="text-sm text-zinc-400 mt-1">Real-time view of everything the agent does</p>
+          <p className="text-sm text-zinc-400 mt-1">{t('activity.subtitle')}</p>
         </div>
         <div className="flex items-center gap-3">
           <button
@@ -105,14 +107,14 @@ export function ActivityPage() {
             }`}
           >
             <RefreshCw className={`w-3 h-3 ${autoRefresh ? 'animate-spin' : ''}`} style={autoRefresh ? { animationDuration: '3s' } : undefined} />
-            {autoRefresh ? 'Live' : 'Paused'}
+            {autoRefresh ? t('common.live') : t('common.paused')}
           </button>
           <button
             onClick={fetchData}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-zinc-800 text-zinc-400 border border-zinc-700 hover:text-white transition-colors"
           >
             <RefreshCw className="w-3 h-3" />
-            Refresh
+            {t('common.refresh')}
           </button>
         </div>
       </div>
@@ -120,28 +122,28 @@ export function ActivityPage() {
       {/* Stats Cards */}
       {stats && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard label="Total Today" value={stats.totalToday} icon={Activity} color="text-zinc-300" />
-          <StatCard label="Host Commands" value={stats.hostToday} icon={Monitor} color="text-amber-400" />
-          <StatCard label="Blocked" value={stats.blockedToday} icon={Shield} color="text-red-400" />
-          <StatCard label="Errors" value={stats.errorToday} icon={AlertTriangle} color="text-red-400" />
+          <StatCard label={t('activity.totalToday')} value={stats.totalToday} icon={Activity} color="text-zinc-300" />
+          <StatCard label={t('activity.hostCommands')} value={stats.hostToday} icon={Monitor} color="text-amber-400" />
+          <StatCard label={t('activity.blocked')} value={stats.blockedToday} icon={Shield} color="text-red-400" />
+          <StatCard label={t('activity.errors')} value={stats.errorToday} icon={AlertTriangle} color="text-red-400" />
         </div>
       )}
 
       {/* Filters */}
       <div className="flex items-center gap-2">
         <Filter className="w-4 h-4 text-zinc-500" />
-        <span className="text-xs text-zinc-500">Filter:</span>
-        {['all', 'host', 'server', 'companion'].map((t) => (
+        <span className="text-xs text-zinc-500">{t('common.filter')}:</span>
+        {['all', 'host', 'server', 'companion'].map((tgt) => (
           <button
-            key={t}
-            onClick={() => setFilter(f => ({ ...f, target: t === 'all' ? undefined : t }))}
+            key={tgt}
+            onClick={() => setFilter(f => ({ ...f, target: tgt === 'all' ? undefined : tgt }))}
             className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
-              (t === 'all' && !filter.target) || filter.target === t
+              (tgt === 'all' && !filter.target) || filter.target === tgt
                 ? 'bg-forge-500/15 text-forge-400'
                 : 'bg-zinc-800 text-zinc-500 hover:text-zinc-300'
             }`}
           >
-            {t === 'all' ? 'All' : TARGET_LABELS[t] || t}
+            {tgt === 'all' ? t('common.all') : TARGET_LABELS[tgt] || tgt}
           </button>
         ))}
         <div className="w-px h-4 bg-zinc-700 mx-1" />
@@ -155,7 +157,7 @@ export function ActivityPage() {
                 : 'bg-zinc-800 text-zinc-500 hover:text-zinc-300'
             }`}
           >
-            {r === 'all' ? 'All Risk' : r.charAt(0).toUpperCase() + r.slice(1)}
+            {r === 'all' ? t('activity.allRisk') : r.charAt(0).toUpperCase() + r.slice(1)}
           </button>
         ))}
       </div>
@@ -163,11 +165,11 @@ export function ActivityPage() {
       {/* Activity Feed */}
       <div className="rounded-xl border border-zinc-800 overflow-hidden">
         <div className="bg-zinc-800/30 px-5 py-3 flex items-center gap-4 text-xs text-zinc-400 border-b border-zinc-800">
-          <span className="w-20">Time</span>
-          <span className="w-20">Target</span>
-          <span className="w-20">Risk</span>
-          <span className="flex-1">Activity</span>
-          <span className="w-20 text-right">Duration</span>
+          <span className="w-20">{t('common.time')}</span>
+          <span className="w-20">{t('activity.target')}</span>
+          <span className="w-20">{t('activity.risk')}</span>
+          <span className="flex-1">{t('activity.activity')}</span>
+          <span className="w-20 text-right">{t('activity.duration')}</span>
         </div>
 
         {loading ? (
@@ -177,7 +179,7 @@ export function ActivityPage() {
         ) : activities.length === 0 ? (
           <div className="text-center py-12">
             <Activity className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
-            <p className="text-sm text-zinc-500">No activity recorded yet</p>
+            <p className="text-sm text-zinc-500">{t('activity.noActivity')}</p>
             <p className="text-xs text-zinc-600 mt-1">Activities will appear here when the agent executes tools</p>
           </div>
         ) : (

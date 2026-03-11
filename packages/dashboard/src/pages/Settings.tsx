@@ -566,7 +566,7 @@ export function SettingsPage() {
                       </a>
                       <button
                         onClick={async () => {
-                          if (!confirm(`Deletar "${site.name}" permanentemente? Esta ação não pode ser desfeita.`)) return;
+                          if (!confirm(t('settings.confirmDeleteSite').replace('{name}', site.name))) return;
                           try {
                             if (site.type === 'app') {
                               await api.unregisterApp(site.name);
@@ -575,10 +575,10 @@ export function SettingsPage() {
                             }
                             loadDomainSettings();
                           } catch (e) {
-                            alert(e instanceof Error ? e.message : 'Erro ao deletar');
+                            alert(e instanceof Error ? e.message : t('common.deleteError'));
                           }
                         }}
-                        title={`Deletar ${site.name}`}
+                        title={t('common.delete') + ' ' + site.name}
                         className="p-1 rounded hover:bg-red-500/20 text-zinc-500 hover:text-red-400 transition-colors"
                       >
                         <Trash2 className="w-3.5 h-3.5" />

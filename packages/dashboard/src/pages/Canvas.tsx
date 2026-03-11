@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Layers, Plus, Trash2, Search, Code2, BarChart3, FileText, Image, GitBranch, Globe, X } from 'lucide-react';
 import { ArtifactRenderer } from '../components/ArtifactRenderer';
+import { useI18n } from '@/lib/i18n';
 
 interface Artifact {
   id: string;
@@ -36,6 +37,7 @@ async function api<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export function CanvasPage() {
+  const { t } = useI18n();
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [search, setSearch] = useState('');
   const [showCreate, setShowCreate] = useState(false);
@@ -130,8 +132,8 @@ export function CanvasPage() {
             <Layers className="w-5 h-5 text-violet-400" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-white">ForgeCanvas</h1>
-            <p className="text-sm text-zinc-500">{artifacts.length} artifact{artifacts.length !== 1 ? 's' : ''} — Live visual artifacts rendered in sandboxed iframes</p>
+            <h1 className="text-xl font-bold text-white">{t('canvas.title')}</h1>
+            <p className="text-sm text-zinc-500">{t('canvas.subtitle')}</p>
           </div>
         </div>
         <button
@@ -139,7 +141,7 @@ export function CanvasPage() {
           className="flex items-center gap-2 px-4 py-2 bg-violet-600 hover:bg-violet-500 rounded-lg text-white text-sm font-medium transition-colors"
         >
           {showCreate ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-          {showCreate ? 'Cancel' : 'New Artifact'}
+          {showCreate ? t('common.cancel') : t('canvas.create')}
         </button>
       </div>
 
@@ -148,7 +150,7 @@ export function CanvasPage() {
         <div className="rounded-xl border border-zinc-700/50 bg-zinc-900/80 p-5 space-y-4">
           <div className="flex items-center gap-2 mb-1">
             <Plus className="w-4 h-4 text-violet-400" />
-            <span className="text-sm font-medium text-zinc-200">Create Artifact</span>
+            <span className="text-sm font-medium text-zinc-200">{t('canvas.create')}</span>
           </div>
 
           {/* Type selector */}
@@ -180,7 +182,7 @@ export function CanvasPage() {
             type="text"
             value={createTitle}
             onChange={e => setCreateTitle(e.target.value)}
-            placeholder="Artifact title..."
+            placeholder={t('canvas.title_label')}
             className="w-full px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-200 text-sm placeholder-zinc-500 focus:outline-none focus:border-violet-500"
           />
 
@@ -202,7 +204,7 @@ export function CanvasPage() {
           <textarea
             value={createContent}
             onChange={e => setCreateContent(e.target.value)}
-            placeholder={selectedTypeOption?.placeholder || 'Artifact content...'}
+            placeholder={selectedTypeOption?.placeholder || t('canvas.content')}
             rows={12}
             className="w-full px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-200 text-sm font-mono placeholder-zinc-600 focus:outline-none focus:border-violet-500 resize-y"
           />
@@ -212,14 +214,14 @@ export function CanvasPage() {
               onClick={() => setShowCreate(false)}
               className="px-4 py-2 rounded-lg bg-zinc-800 text-zinc-400 hover:text-zinc-200 text-sm transition-colors"
             >
-              Cancel
+              {t('common.cancel')}
             </button>
             <button
               onClick={handleCreate}
               disabled={creating || !createTitle.trim() || !createContent.trim()}
               className="px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
             >
-              {creating ? 'Creating...' : 'Create'}
+              {creating ? t('canvas.creating') : t('common.create')}
             </button>
           </div>
         </div>
@@ -233,7 +235,7 @@ export function CanvasPage() {
             type="text"
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="Search artifacts..."
+            placeholder={t('canvas.search')}
             className="w-full pl-10 pr-4 py-2 rounded-lg bg-zinc-800/60 border border-zinc-700/50 text-zinc-200 text-sm placeholder-zinc-500 focus:outline-none focus:border-violet-500"
           />
         </div>
@@ -255,14 +257,14 @@ export function CanvasPage() {
         <div className="text-center py-16">
           <Layers className="w-12 h-12 text-zinc-600 mx-auto mb-3" />
           <p className="text-zinc-500 text-sm">
-            {search ? 'No artifacts match your search' : 'No artifacts yet. Create one or ask the agent to generate a visual artifact.'}
+            {search ? t('common.noResults') : t('canvas.noArtifactsDesc')}
           </p>
           {!search && !showCreate && (
             <button
               onClick={() => setShowCreate(true)}
               className="mt-4 px-4 py-2 bg-violet-600/20 hover:bg-violet-600/30 rounded-lg text-violet-400 text-sm font-medium transition-colors"
             >
-              Create your first artifact
+              {t('canvas.create')}
             </button>
           )}
         </div>

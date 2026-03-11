@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Wrench, Play, ChevronDown, ChevronUp, Loader2, CheckCircle2, XCircle, Server, Plus, Trash2, Plug, Unplug } from 'lucide-react';
+import { useI18n } from '@/lib/i18n';
 
 interface ToolParam {
   name: string;
@@ -41,6 +42,7 @@ interface MCPTool {
 type ToolsTab = 'builtin' | 'mcp';
 
 export function ToolsPage() {
+  const { t } = useI18n();
   const [tab, setTab] = useState<ToolsTab>('builtin');
   const [tools, setTools] = useState<ToolInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -148,23 +150,23 @@ export function ToolsPage() {
             <Wrench className="w-5 h-5 text-forge-400" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-white">Tools</h1>
-            <p className="text-sm text-zinc-500">{tools.length} built-in + {mcpTools.length} MCP tools</p>
+            <h1 className="text-2xl font-bold text-white">{t('tools.title')}</h1>
+            <p className="text-sm text-zinc-500">{tools.length} {t('tools.builtIn')} + {mcpTools.length} {t('tools.mcpTools')}</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {(['builtin', 'mcp'] as ToolsTab[]).map(t => (
+          {(['builtin', 'mcp'] as ToolsTab[]).map(tb => (
             <button
-              key={t}
-              onClick={() => setTab(t)}
+              key={tb}
+              onClick={() => setTab(tb)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                tab === t
+                tab === tb
                   ? 'bg-forge-500/20 text-forge-400 border border-forge-500/30'
                   : 'bg-zinc-800/50 text-zinc-400 hover:text-zinc-200 border border-transparent'
               }`}
             >
-              {t === 'builtin' ? <Wrench className="w-3.5 h-3.5" /> : <Server className="w-3.5 h-3.5" />}
-              {t === 'builtin' ? `Built-in (${tools.length})` : `MCP Servers (${mcpServers.length})`}
+              {tb === 'builtin' ? <Wrench className="w-3.5 h-3.5" /> : <Server className="w-3.5 h-3.5" />}
+              {tb === 'builtin' ? `${t('tools.builtIn')} (${tools.length})` : `MCP Servers (${mcpServers.length})`}
             </button>
           ))}
         </div>
@@ -182,7 +184,7 @@ export function ToolsPage() {
               onClick={() => setShowAddServer(!showAddServer)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-forge-500 hover:bg-forge-600 text-white transition-colors"
             >
-              <Plus className="w-3.5 h-3.5" /> Adicionar Server
+              <Plus className="w-3.5 h-3.5" /> {t('tools.addServer')}
             </button>
           </div>
 
@@ -190,7 +192,7 @@ export function ToolsPage() {
             <div className="bg-zinc-950/50 border border-zinc-800 rounded-xl p-4 space-y-3">
               <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="text-xs text-zinc-500 mb-1 block">Nome</label>
+                  <label className="text-xs text-zinc-500 mb-1 block">{t('common.name')}</label>
                   <input
                     type="text" value={newServer.name} onChange={e => setNewServer(s => ({ ...s, name: e.target.value }))}
                     placeholder="meu-server" className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-forge-500/50"
@@ -219,23 +221,23 @@ export function ToolsPage() {
               <div className="flex gap-2">
                 <button onClick={addMCPServer} disabled={!newServer.name || !newServer.url}
                   className="px-3 py-1.5 rounded-lg text-xs font-medium bg-forge-500 hover:bg-forge-600 text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
-                  Adicionar
+                  {t('common.add')}
                 </button>
                 <button onClick={() => setShowAddServer(false)}
                   className="px-3 py-1.5 rounded-lg text-xs font-medium bg-zinc-800 text-zinc-400 hover:text-zinc-200 transition-colors">
-                  Cancelar
+                  {t('common.cancel')}
                 </button>
               </div>
             </div>
           )}
 
           {mcpLoading ? (
-            <div className="flex items-center gap-2 text-zinc-400 py-4"><Loader2 className="w-4 h-4 animate-spin" /> Carregando...</div>
+            <div className="flex items-center gap-2 text-zinc-400 py-4"><Loader2 className="w-4 h-4 animate-spin" /> {t('common.loading')}</div>
           ) : mcpServers.length === 0 ? (
             <div className="text-center py-12 text-zinc-500">
               <Server className="w-8 h-8 mx-auto mb-2 opacity-30" />
-              <p className="text-sm">Nenhum MCP server configurado</p>
-              <p className="text-xs text-zinc-600 mt-1">Clique "Adicionar Server" para conectar um tool server externo</p>
+              <p className="text-sm">{t('tools.noMcpServers')}</p>
+              <p className="text-xs text-zinc-600 mt-1">{t('tools.noMcpServersHint')}</p>
             </div>
           ) : (
             <div className="space-y-2">
@@ -266,7 +268,7 @@ export function ToolsPage() {
 
           {mcpTools.length > 0 && (
             <div className="mt-4">
-              <h3 className="text-sm font-semibold text-zinc-400 mb-2">Tools disponíveis ({mcpTools.length})</h3>
+              <h3 className="text-sm font-semibold text-zinc-400 mb-2">{t('tools.availableTools')} ({mcpTools.length})</h3>
               <div className="grid grid-cols-2 gap-2">
                 {mcpTools.map(t => (
                   <div key={t.name} className="bg-zinc-900/50 border border-zinc-800 rounded-lg px-3 py-2">

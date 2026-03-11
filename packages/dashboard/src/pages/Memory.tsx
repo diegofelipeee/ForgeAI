@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Brain, Search, Trash2, Loader2, Database, Sparkles, BarChart3 } from 'lucide-react';
+import { useI18n } from '@/lib/i18n';
 
 interface MemoryEntry {
   id: string;
@@ -15,6 +16,7 @@ interface MemoryStats {
 }
 
 export function MemoryPage() {
+  const { t } = useI18n();
   const [stats, setStats] = useState<MemoryStats>({});
   const [searchQuery, setSearchQuery] = useState('');
   const [results, setResults] = useState<MemoryEntry[]>([]);
@@ -61,10 +63,10 @@ export function MemoryPage() {
       <div>
         <h1 className="text-2xl font-bold text-white flex items-center gap-2">
           <Brain className="w-6 h-6 text-purple-400" />
-          Agent Memory
+          {t('memory.title')}
         </h1>
         <p className="text-sm text-zinc-400 mt-1">
-          Memória de longo prazo do agente — busque, visualize e gerencie entradas.
+          {t('memory.subtitle')}
         </p>
       </div>
 
@@ -73,17 +75,17 @@ export function MemoryPage() {
         <div className="bg-zinc-950/50 border border-zinc-800 rounded-xl p-4 text-center">
           <Database className="w-4 h-4 text-purple-400 mx-auto mb-1" />
           <p className="text-xl font-bold text-white">{stats.totalEntries ?? 0}</p>
-          <p className="text-[10px] text-zinc-500">Memórias</p>
+          <p className="text-[10px] text-zinc-500">{t('memory.entries')}</p>
         </div>
         <div className="bg-zinc-950/50 border border-zinc-800 rounded-xl p-4 text-center">
           <BarChart3 className="w-4 h-4 text-purple-400 mx-auto mb-1" />
           <p className="text-xl font-bold text-white">{stats.totalTokens ?? 0}</p>
-          <p className="text-[10px] text-zinc-500">Tokens armazenados</p>
+          <p className="text-[10px] text-zinc-500">{t('memory.tokens')}</p>
         </div>
         <div className="bg-zinc-950/50 border border-zinc-800 rounded-xl p-4 text-center">
           <Sparkles className="w-4 h-4 text-purple-400 mx-auto mb-1" />
           <p className="text-xl font-bold text-white">{stats.avgImportance ? (stats.avgImportance * 100).toFixed(0) + '%' : '—'}</p>
-          <p className="text-[10px] text-zinc-500">Importância média</p>
+          <p className="text-[10px] text-zinc-500">{t('memory.avgImportance')}</p>
         </div>
       </div>
 
@@ -96,7 +98,7 @@ export function MemoryPage() {
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleSearch()}
-            placeholder="Buscar na memória do agente (ex: preferências do usuário, projetos, tech stack...)"
+            placeholder={t('memory.search')}
             className="w-full bg-zinc-900 border border-zinc-700 rounded-lg pl-9 pr-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
           />
         </div>
@@ -105,11 +107,11 @@ export function MemoryPage() {
           disabled={searching || !searchQuery.trim()}
           className="px-4 py-2 rounded-lg text-sm font-medium bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 transition-colors"
         >
-          {searching ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Buscar'}
+          {searching ? <Loader2 className="w-4 h-4 animate-spin" /> : t('memory.searchBtn')}
         </button>
         <button
           onClick={handleConsolidate}
-          title="Consolidar memórias (merge duplicatas)"
+          title={t('memory.consolidateTitle')}
           className="px-3 py-2 rounded-lg text-xs text-zinc-400 hover:text-zinc-200 bg-zinc-800 hover:bg-zinc-700 transition-colors"
         >
           <Sparkles className="w-4 h-4" />
@@ -119,7 +121,7 @@ export function MemoryPage() {
       {/* Results */}
       {results.length > 0 && (
         <div className="space-y-2">
-          <h3 className="text-sm font-semibold text-zinc-400">{results.length} resultado(s)</h3>
+          <h3 className="text-sm font-semibold text-zinc-400">{results.length} {t('memory.results')}</h3>
           {results.map(entry => (
             <div key={entry.id} className="bg-zinc-950/50 border border-zinc-800 rounded-xl px-4 py-3">
               <div className="flex items-start justify-between gap-3">
@@ -128,12 +130,12 @@ export function MemoryPage() {
                   <div className="flex items-center gap-3 mt-2 text-[10px] text-zinc-600">
                     <span className="font-mono">{entry.id.slice(0, 12)}...</span>
                     {entry.score !== undefined && <span>Score: {entry.score.toFixed(3)}</span>}
-                    {entry.importance !== undefined && <span>Importância: {(entry.importance * 100).toFixed(0)}%</span>}
+                    {entry.importance !== undefined && <span>{t('memory.importance')}: {(entry.importance * 100).toFixed(0)}%</span>}
                   </div>
                 </div>
                 <button
                   onClick={() => handleDelete(entry.id)}
-                  title="Deletar memória"
+                  title={t('memory.deleteTitle')}
                   className="p-1 rounded text-zinc-600 hover:text-red-400 transition-colors shrink-0"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
@@ -147,7 +149,7 @@ export function MemoryPage() {
       {results.length === 0 && !loading && !searching && (
         <div className="text-center py-8 text-zinc-500">
           <Brain className="w-8 h-8 mx-auto mb-2 opacity-20" />
-          <p className="text-sm">Busque algo para ver memórias do agente</p>
+          <p className="text-sm">{t('memory.noResults')}</p>
         </div>
       )}
     </div>

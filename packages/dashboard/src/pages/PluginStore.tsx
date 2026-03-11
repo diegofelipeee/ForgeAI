@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { api } from '@/lib/api';
+import { useI18n } from '@/lib/i18n';
 
 interface PluginEntry {
   id: string;
@@ -20,6 +21,7 @@ interface PluginEntry {
 }
 
 export default function PluginStorePage() {
+  const { t } = useI18n();
   const [plugins, setPlugins] = useState<PluginEntry[]>([]);
   const [filter, setFilter] = useState<string>('all');
   const [loading, setLoading] = useState(true);
@@ -64,8 +66,8 @@ export default function PluginStorePage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-zinc-100">Plugin Store</h1>
-        <p className="text-zinc-400 mt-1">Browse, install, and manage plugins</p>
+        <h1 className="text-2xl font-bold text-zinc-100">{t('plugins.title')}</h1>
+        <p className="text-zinc-400 mt-1">{t('plugins.subtitle')}</p>
       </div>
 
       {/* Filters */}
@@ -74,7 +76,7 @@ export default function PluginStorePage() {
           onClick={() => setFilter('all')}
           className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${filter === 'all' ? 'bg-orange-500 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}
         >
-          All ({plugins.length})
+          {t('plugins.all')} ({plugins.length})
         </button>
         {categories.map(cat => (
           <button
@@ -88,9 +90,9 @@ export default function PluginStorePage() {
       </div>
 
       {loading ? (
-        <div className="text-center py-12 text-zinc-500">Loading plugins...</div>
+        <div className="text-center py-12 text-zinc-500">{t('common.loading')}</div>
       ) : filtered.length === 0 ? (
-        <div className="text-center py-12 text-zinc-500">No plugins found</div>
+        <div className="text-center py-12 text-zinc-500">{t('plugins.noPlugins')}</div>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {filtered.map(plugin => (
@@ -98,7 +100,7 @@ export default function PluginStorePage() {
               <div className="flex items-start justify-between mb-3">
                 <div>
                   <h3 className="text-lg font-semibold text-zinc-100">{plugin.manifest.name}</h3>
-                  <span className="text-xs text-zinc-500">v{plugin.manifest.version} by {plugin.manifest.author}</span>
+                  <span className="text-xs text-zinc-500">v{plugin.manifest.version} {t('plugins.by')} {plugin.manifest.author}</span>
                 </div>
                 <span className={`px-2 py-0.5 rounded-full text-xs font-medium capitalize ${categoryColors[plugin.category] ?? 'bg-zinc-700 text-zinc-300'}`}>
                   {plugin.category}
@@ -116,7 +118,7 @@ export default function PluginStorePage() {
 
               {/* Permissions */}
               <div className="mb-3">
-                <span className="text-xs text-zinc-500 font-medium">Permissions:</span>
+                <span className="text-xs text-zinc-500 font-medium">{t('channels.permissions')}:</span>
                 <div className="flex flex-wrap gap-1 mt-1">
                   {plugin.manifest.permissions.map(perm => (
                     <span key={perm} className="bg-zinc-800/50 text-zinc-500 px-1.5 py-0.5 rounded text-xs">{perm}</span>
@@ -147,11 +149,11 @@ export default function PluginStorePage() {
                           : 'bg-zinc-700 text-zinc-300 hover:bg-green-500/20 hover:text-green-400'
                       }`}
                     >
-                      {plugin.enabled ? 'Enabled' : 'Disabled'}
+                      {plugin.enabled ? t('common.enabled') : t('common.disabled')}
                     </button>
                   ) : (
                     <button className="px-3 py-1 rounded-lg text-xs font-medium bg-orange-500/20 text-orange-400 hover:bg-orange-500/30">
-                      Install
+                      {t('plugins.install')}
                     </button>
                   )}
                 </div>

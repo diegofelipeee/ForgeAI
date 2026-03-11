@@ -968,7 +968,7 @@ export function ChatPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith('image/')) return;
-    if (file.size > 10 * 1024 * 1024) { alert('Imagem muito grande (máx 10MB)'); return; }
+    if (file.size > 10 * 1024 * 1024) { alert(t('chat.imageTooLarge')); return; }
 
     const reader = new FileReader();
     reader.onload = () => {
@@ -1077,7 +1077,7 @@ export function ChatPage() {
         {
           id: `stop-${Date.now()}`,
           role: 'assistant',
-          content: '⏹️ Execução interrompida pelo usuário.',
+          content: `⏹️ ${t('chat.executionStopped')}`,
         },
       ]);
     } catch {
@@ -1142,7 +1142,7 @@ export function ChatPage() {
           </div>
           <div className="flex-1 overflow-y-auto p-2 space-y-1">
             {sessions.length === 0 && (
-              <p className="text-xs text-zinc-600 text-center py-4">Nenhuma conversa ainda</p>
+              <p className="text-xs text-zinc-600 text-center py-4">{t('chat.noSessions')}</p>
             )}
             {sessions.map((s) => (
               <div
@@ -1171,7 +1171,7 @@ export function ChatPage() {
                 <button
                   onClick={(e) => deleteSession(s.id, e)}
                   className="absolute top-2 right-2 p-0.5 rounded opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-all"
-                  title="Deletar conversa"
+                  title={t('chat.deleteConversation')}
                 >
                   <X className="w-3 h-3" />
                 </button>
@@ -1199,7 +1199,7 @@ export function ChatPage() {
                 {sessionChannelType && sessionChannelType !== 'webchat' && <ChannelBadge channelType={sessionChannelType} />}
               </h1>
               <p className="text-xs text-zinc-500">
-                {sessionId ? `Sessão: ${sessionId.slice(0, 16)}...` : 'Nova conversa'}
+                {sessionId ? `${t('chat.session')}: ${sessionId.slice(0, 16)}...` : t('chat.newConversation')}
               </p>
             </div>
           </div>
@@ -1207,10 +1207,10 @@ export function ChatPage() {
             <button
               onClick={(e) => deleteSession(sessionId, e as React.MouseEvent)}
               className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-zinc-700 text-zinc-400 hover:text-red-400 hover:border-red-500/30 transition-colors"
-              title="Deletar esta conversa"
+              title={t('chat.deleteConversation')}
             >
               <Trash2 className="w-3.5 h-3.5" />
-              Deletar
+              {t('common.delete')}
             </button>
           )}
         </div>
@@ -1224,8 +1224,7 @@ export function ChatPage() {
               </div>
               <h2 className="text-lg font-semibold text-white mb-1">ForgeAI Assistant</h2>
               <p className="text-sm text-zinc-500 max-w-md">
-                Posso criar arquivos, executar comandos e construir projetos.
-                Peça para criar um site, rodar código, ou qualquer coisa que precisar.
+                {t('chat.welcomeText')}
               </p>
             </div>
           )}

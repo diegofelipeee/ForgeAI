@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Video, Play, Pause, Square, Trash2, Clock, Wrench, MessageSquare, Brain, ChevronRight, RotateCcw, Search, Circle, Loader2 } from 'lucide-react';
+import { useI18n } from '@/lib/i18n';
 
 interface RecordingEvent {
   offset: number;
@@ -119,6 +120,7 @@ function EventCard({ event, isActive }: { event: RecordingEvent; isActive: boole
 }
 
 function TimelinePlayer({ recording }: { recording: FullRecording }) {
+  const { t } = useI18n();
   const [playing, setPlaying] = useState(false);
   const [currentOffset, setCurrentOffset] = useState(0);
   const [activeIdx, setActiveIdx] = useState(-1);
@@ -167,10 +169,10 @@ function TimelinePlayer({ recording }: { recording: FullRecording }) {
     <div className="space-y-4">
       {/* Controls */}
       <div className="flex items-center gap-3">
-        <button onClick={() => setPlaying(!playing)} title={playing ? 'Pause' : 'Play'} className="p-2 rounded-lg bg-forge-500 hover:bg-forge-600 text-white transition-colors">
+        <button onClick={() => setPlaying(!playing)} title={playing ? t('recordings.pause') : t('recordings.play')} className="p-2 rounded-lg bg-forge-500 hover:bg-forge-600 text-white transition-colors">
           {playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
         </button>
-        <button onClick={reset} title="Reset" className="p-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors">
+        <button onClick={reset} title={t('recordings.replay')} className="p-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors">
           <RotateCcw className="w-4 h-4" />
         </button>
 
@@ -192,8 +194,8 @@ function TimelinePlayer({ recording }: { recording: FullRecording }) {
 
       {/* Stats bar */}
       <div className="flex gap-4 text-[11px] text-zinc-500">
-        <span><MessageSquare className="w-3 h-3 inline mr-1" />{recording.stats.messageCount} msgs</span>
-        <span><Wrench className="w-3 h-3 inline mr-1" />{recording.stats.toolCalls} tools ({recording.stats.toolSuccesses}✓ {recording.stats.toolFailures}✗)</span>
+        <span><MessageSquare className="w-3 h-3 inline mr-1" />{recording.stats.messageCount} {t('recordings.messages')}</span>
+        <span><Wrench className="w-3 h-3 inline mr-1" />{recording.stats.toolCalls} {t('recordings.toolCalls')} ({recording.stats.toolSuccesses}✓ {recording.stats.toolFailures}✗)</span>
         <span><Brain className="w-3 h-3 inline mr-1" />{recording.stats.thinkingSteps} thoughts</span>
         <span><Clock className="w-3 h-3 inline mr-1" />{recording.stats.iterations} iterations</span>
         {recording.stats.toolsUsed.length > 0 && (
@@ -212,6 +214,7 @@ function TimelinePlayer({ recording }: { recording: FullRecording }) {
 }
 
 export function RecordingsPage() {
+  const { t } = useI18n();
   const [recordings, setRecordings] = useState<RecordingSummary[]>([]);
   const [selected, setSelected] = useState<FullRecording | null>(null);
   const [loading, setLoading] = useState(false);
@@ -256,8 +259,8 @@ export function RecordingsPage() {
             <Video className="w-5 h-5 text-cyan-400" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-white">Session Recordings</h1>
-            <p className="text-sm text-zinc-500">{recordings.length} recording{recordings.length !== 1 ? 's' : ''} — Debug, audit, and replay agent sessions step-by-step</p>
+            <h1 className="text-xl font-bold text-white">{t('recordings.title')}</h1>
+            <p className="text-sm text-zinc-500">{t('recordings.subtitle')}</p>
           </div>
         </div>
       </div>
@@ -270,7 +273,7 @@ export function RecordingsPage() {
             type="text"
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="Search recordings..."
+            placeholder={t('recordings.search')}
             className="w-full pl-10 pr-4 py-2 rounded-lg bg-zinc-800/60 border border-zinc-700/50 text-zinc-200 text-sm placeholder-zinc-500 focus:outline-none focus:border-cyan-500"
           />
         </div>
@@ -287,7 +290,7 @@ export function RecordingsPage() {
               <span className="text-[10px] text-zinc-600">{formatDuration(selected.duration)}</span>
             </div>
             <button onClick={() => setSelected(null)} className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors">
-              Close
+              {t('common.close')}
             </button>
           </div>
           <div className="p-5">
@@ -338,7 +341,7 @@ export function RecordingsPage() {
                 <button
                   onClick={(e) => { e.stopPropagation(); handleDelete(rec.id); }}
                   className="p-1.5 rounded-md text-zinc-600 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                  title="Delete recording"
+                  title={t('common.delete')}
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
@@ -351,7 +354,7 @@ export function RecordingsPage() {
         <div className="text-center py-16">
           <Video className="w-12 h-12 text-zinc-600 mx-auto mb-3" />
           <p className="text-zinc-500 text-sm">
-            {search ? 'No recordings match your search' : 'No recordings yet. Start recording a session from the Chat page or via the API.'}
+            {search ? t('common.noResults') : t('recordings.noRecordings')}
           </p>
           <p className="text-zinc-600 text-xs mt-2">
             POST /api/recordings/start with {'{'} sessionId: "..." {'}'}
